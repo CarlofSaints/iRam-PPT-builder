@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/image?url=<perigee-portal-url>
  *
- * If IMAGE_PROXY_URL env var is set (Cloudflare Worker), forwards through that.
- * Otherwise tries to fetch directly from Perigee (may get 403 from datacenter IPs).
+ * Routes through Cloudflare Worker (IMAGE_PROXY_URL) with Perigee session
+ * cookie (PERIGEE_SESSION_COOKIE) for authentication.
  */
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -17,25 +17,31 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const externalProxy = process.env.IMAGE_PROXY_URL;
+    const sessionCookie = process.env.PERIGEE_SESSION_COOKIE;
+
+    const headers: Record<string, string> = {};
+    if (sessionCookie) {
+      headers["X-Perigee-Cookie"] = sessionCookie;
+    }
+
     let upstream: Response;
 
-    const externalProxy = process.env.IMAGE_PROXY_URL;
     if (externalProxy) {
-      // Route through Cloudflare Worker (different IP range, not blocked)
+      // Route through Cloudflare Worker with session cookie
       const proxyUrl = `${externalProxy}?url=${encodeURIComponent(url)}`;
-      upstream = await fetch(proxyUrl);
-      console.log(`[image-proxy] External proxy: ${url.substring(0, 60)}... → ${upstream.status}`);
+      upstream = await fetch(proxyUrl, { headers });
     } else {
-      // Direct fetch (will likely get 403 from Vercel datacenter IPs)
-      upstream = await fetch(url, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-          Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-        },
-      });
-      console.log(`[image-proxy] Direct: ${url.substring(0, 60)}... → ${upstream.status}`);
+      // Direct fetch (fallback — likely blocked by Perigee)
+      if (sessionCookie) {
+        headers["Cookie"] = sessionCookie;
+      }
+      headers["User-Agent"] =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+      upstream = await fetch(url, { headers });
     }
+
+    console.log(`[image-proxy] ${url.substring(0, 60)}... → ${upstream.status}`);
 
     if (!upstream.ok) {
       return new NextResponse(`Upstream error: ${upstream.status}`, {
