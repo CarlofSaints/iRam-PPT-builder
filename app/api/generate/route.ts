@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import type { ParsedData, ImageData } from "@/lib/types";
 import { getTemplate } from "@/lib/templateData";
-import { downloadAllImages } from "@/lib/perigeeImages";
 import { buildPptx } from "@/lib/pptBuilder";
 
 export const maxDuration = 120;
@@ -9,9 +8,10 @@ export const maxDuration = 120;
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { data, templateId } = body as {
+    const { data, templateId, images } = body as {
       data: ParsedData;
       templateId?: string;
+      images?: Record<string, string>; // url → base64 (pre-downloaded by client)
     };
 
     if (!data || !data.rows) {
@@ -26,44 +26,18 @@ export async function POST(req: Request) {
       return Response.json({ error: "Template not found" }, { status: 404 });
     }
 
-    // Collect all unique image URLs from completed rows
-    const allUrls: string[] = [];
-    for (const row of data.rows) {
-      if (row.replyStatus.toLowerCase().trim() !== "completed") continue;
-      for (const url of row.images) {
-        if (url && !allUrls.includes(url)) allUrls.push(url);
-      }
-    }
-
-    console.log(`[generate] Found ${allUrls.length} unique image URLs from ${data.rows.filter(r => r.replyStatus.toLowerCase().trim() === "completed").length} completed rows`);
-    if (allUrls.length > 0) {
-      console.log(`[generate] Sample URL: ${allUrls[0]}`);
-    }
-    // Also log rows with images vs without
-    for (const row of data.rows) {
-      if (row.replyStatus.toLowerCase().trim() === "completed") {
-        console.log(`[generate] Store: ${row.store} — ${row.images.length} images: ${row.images.join(", ").substring(0, 200)}`);
-      }
-    }
-
-    // Download and process all images
-    const imageResults = await downloadAllImages(allUrls);
-
-    // Build url → ImageData map
+    // Build url → ImageData map from client-provided base64 images
     const imageMap = new Map<string, ImageData>();
     let successCount = 0;
-    let failCount = 0;
-    for (let i = 0; i < allUrls.length; i++) {
-      const img = imageResults[i];
-      if (img) {
-        imageMap.set(allUrls[i], img);
-        successCount++;
-      } else {
-        failCount++;
-        console.warn(`[generate] FAILED to download: ${allUrls[i]}`);
+    if (images) {
+      for (const [url, base64] of Object.entries(images)) {
+        if (base64) {
+          imageMap.set(url, { data: base64, type: "jpeg" });
+          successCount++;
+        }
       }
     }
-    console.log(`[generate] Images downloaded: ${successCount} success, ${failCount} failed`);
+    console.log(`[generate] Received ${successCount} pre-downloaded images from client`);
 
     // Build the PPTX
     const pptxBuffer = await buildPptx(data, template, imageMap);
