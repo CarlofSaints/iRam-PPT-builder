@@ -108,7 +108,7 @@ export default function EditTemplatePage({
         <p className="text-sm text-red-500">Template not found</p>
         <button
           onClick={() => router.push("/control-centre")}
-          className="text-sm text-[#003B75] hover:underline"
+          className="text-sm text-[#5a9a2e] hover:underline"
         >
           Back to Control Centre
         </button>
@@ -139,7 +139,7 @@ export default function EditTemplatePage({
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#003B75]"
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#7CC042]"
           />
         </div>
 
@@ -264,7 +264,7 @@ export default function EditTemplatePage({
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-2 bg-[#003B75] text-white text-sm font-semibold rounded-md hover:bg-[#002d5c] disabled:opacity-50"
+            className="px-4 py-2 bg-[#7CC042] text-white text-sm font-semibold rounded-md hover:bg-[#5a9a2e] disabled:opacity-50"
           >
             {saving ? "Saving..." : "Save Changes"}
           </button>

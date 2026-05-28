@@ -157,7 +157,7 @@ export default function HomePage() {
               value={selectedTemplate}
               onChange={(e) => setSelectedTemplate(e.target.value)}
               disabled={isGenerating}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#003B75]"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#7CC042]"
             >
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -172,7 +172,7 @@ export default function HomePage() {
           <button
             onClick={handleGenerate}
             disabled={isGenerating}
-            className="px-6 py-2 bg-[#E04E2A] text-white text-sm font-semibold rounded-md hover:bg-[#c43d1e] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-6 py-2 bg-[#7CC042] text-white text-sm font-semibold rounded-md hover:bg-[#5a9a2e] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isGenerating ? "Generating..." : "Generate PPT"}
           </button>
@@ -195,7 +195,7 @@ export default function HomePage() {
             setStage("idle");
             setError("");
           }}
-          className="text-sm text-[#003B75] hover:underline"
+          className="text-sm text-[#5a9a2e] hover:underline"
         >
           Generate another report
         </button>

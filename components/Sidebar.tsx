@@ -12,7 +12,7 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-56 bg-[#003B75] text-white flex flex-col min-h-screen">
+    <aside className="w-56 bg-[#32373C] text-white flex flex-col min-h-screen">
       <div className="p-4 border-b border-white/10">
         <h1 className="text-lg font-bold tracking-tight">iRAM PPT Builder</h1>
       </div>

@@ -28,12 +28,12 @@ export default function DataPreview({ data }: Props) {
       {/* Title */}
       <div className="mb-4">
         <span className="text-xs text-gray-500">Task Title:</span>
-        <p className="text-sm font-medium text-[#003B75]">{data.title}</p>
+        <p className="text-sm font-medium text-[#32373C]">{data.title}</p>
       </div>
 
       {/* Summary boxes */}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-4">
-        <SummaryBox label="Total" count={summary.total} color="bg-[#003B75]" />
+        <SummaryBox label="Total" count={summary.total} color="bg-[#32373C]" />
         <SummaryBox label="Completed" count={summary.completed} color="bg-green-600" />
         <SummaryBox label="Not Done" count={summary.notCompleted} color="bg-red-600" />
         <SummaryBox label="Pending" count={summary.pending} color="bg-amber-500" />

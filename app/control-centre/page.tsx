@@ -9,8 +9,8 @@ export default function ControlCentrePage() {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
-  const [newPrimary, setNewPrimary] = useState("003B75");
-  const [newAccent, setNewAccent] = useState("E04E2A");
+  const [newPrimary, setNewPrimary] = useState("7CC042");
+  const [newAccent, setNewAccent] = useState("32373C");
   const [newFont, setNewFont] = useState("Arial");
   const [saving, setSaving] = useState(false);
 
@@ -72,7 +72,7 @@ export default function ControlCentrePage() {
         </div>
         <button
           onClick={() => setShowNew(!showNew)}
-          className="px-4 py-2 bg-[#003B75] text-white text-sm font-semibold rounded-md hover:bg-[#002d5c] transition-colors"
+          className="px-4 py-2 bg-[#7CC042] text-white text-sm font-semibold rounded-md hover:bg-[#5a9a2e] transition-colors"
         >
           {showNew ? "Cancel" : "+ New Template"}
         </button>
@@ -93,7 +93,7 @@ export default function ControlCentrePage() {
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="e.g. Clover Leaf"
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#003B75]"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#7CC042]"
               />
             </div>
             <div>
@@ -154,7 +154,7 @@ export default function ControlCentrePage() {
           <button
             onClick={handleCreate}
             disabled={saving || !newName.trim()}
-            className="px-4 py-2 bg-[#E04E2A] text-white text-sm font-semibold rounded-md hover:bg-[#c43d1e] disabled:opacity-50"
+            className="px-4 py-2 bg-[#7CC042] text-white text-sm font-semibold rounded-md hover:bg-[#5a9a2e] disabled:opacity-50"
           >
             {saving ? "Creating..." : "Create Template"}
           </button>
@@ -203,7 +203,7 @@ export default function ControlCentrePage() {
               <div className="flex items-center gap-2">
                 <Link
                   href={`/control-centre/${t.id}`}
-                  className="text-xs text-[#003B75] hover:underline"
+                  className="text-xs text-[#5a9a2e] hover:underline"
                 >
                   Edit
                 </Link>

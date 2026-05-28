@@ -42,7 +42,7 @@ export default function GenerateProgress({ stage, error, imageCount }: Props) {
                   isDone
                     ? "bg-green-500 text-white"
                     : isActive
-                      ? "bg-[#003B75] text-white"
+                      ? "bg-[#7CC042] text-white"
                       : "bg-gray-200 text-gray-400"
                 }`}
               >
@@ -54,7 +54,7 @@ export default function GenerateProgress({ stage, error, imageCount }: Props) {
                   isDone
                     ? "text-green-600 font-medium"
                     : isActive
-                      ? "text-[#003B75] font-semibold"
+                      ? "text-[#5a9a2e] font-semibold"
                       : isPending
                         ? "text-gray-400"
                         : "text-gray-600"
@@ -67,7 +67,7 @@ export default function GenerateProgress({ stage, error, imageCount }: Props) {
               </span>
               {/* Spinner */}
               {isActive && stage !== "done" && (
-                <div className="w-4 h-4 border-2 border-[#003B75] border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-[#7CC042] border-t-transparent rounded-full animate-spin" />
               )}
             </div>
           );

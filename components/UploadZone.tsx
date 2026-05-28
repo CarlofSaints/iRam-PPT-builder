@@ -45,8 +45,8 @@ export default function UploadZone({ onFile, disabled }: Props) {
         disabled
           ? "border-gray-200 bg-gray-50 cursor-not-allowed opacity-60"
           : dragging
-            ? "border-[#003B75] bg-blue-50"
-            : "border-gray-300 hover:border-[#003B75] hover:bg-gray-50"
+            ? "border-[#7CC042] bg-green-50"
+            : "border-gray-300 hover:border-[#7CC042] hover:bg-gray-50"
       }`}
     >
       <input

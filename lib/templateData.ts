@@ -7,8 +7,8 @@ const BLOB_KEY = "templates.json";
 const DEFAULT_TEMPLATE: PptTemplate = {
   id: "default",
   name: "iRAM Standard",
-  primaryColor: "003B75",
-  accentColor: "E04E2A",
+  primaryColor: "7CC042",
+  accentColor: "32373C",
   logoUrl: null,
   fontFamily: "Arial",
   createdAt: new Date().toISOString(),
@@ -45,8 +45,8 @@ export async function createTemplate(
   const template: PptTemplate = {
     id: crypto.randomUUID(),
     name: data.name,
-    primaryColor: data.primaryColor || "003B75",
-    accentColor: data.accentColor || "E04E2A",
+    primaryColor: data.primaryColor || "7CC042",
+    accentColor: data.accentColor || "32373C",
     logoUrl: null,
     fontFamily: data.fontFamily || "Arial",
     createdAt: new Date().toISOString(),
