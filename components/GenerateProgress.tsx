@@ -12,6 +12,7 @@ interface Props {
   stage: ProgressStage;
   error?: string;
   imageCount?: number;
+  downloadedCount?: number;
 }
 
 const STAGES: { key: ProgressStage; label: string }[] = [
@@ -21,7 +22,7 @@ const STAGES: { key: ProgressStage; label: string }[] = [
   { key: "done", label: "Complete" },
 ];
 
-export default function GenerateProgress({ stage, error, imageCount }: Props) {
+export default function GenerateProgress({ stage, error, imageCount, downloadedCount }: Props) {
   if (stage === "idle") return null;
 
   const currentIdx = STAGES.findIndex((s) => s.key === stage);
@@ -64,6 +65,9 @@ export default function GenerateProgress({ stage, error, imageCount }: Props) {
                 {isActive && s.key === "downloading" && imageCount
                   ? ` (${imageCount} images)`
                   : ""}
+                {isDone && s.key === "downloading" && downloadedCount !== undefined
+                  ? ` — ${downloadedCount}/${imageCount || 0} downloaded`
+                  : ""}
               </span>
               {/* Spinner */}
               {isActive && stage !== "done" && (
@@ -80,7 +84,14 @@ export default function GenerateProgress({ stage, error, imageCount }: Props) {
         </div>
       )}
 
-      {stage === "done" && (
+      {stage === "done" && downloadedCount === 0 && imageCount && imageCount > 0 && (
+        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-700">
+          Warning: 0 of {imageCount} images could be downloaded. The PPT was generated without images.
+          Perigee may be blocking image access.
+        </div>
+      )}
+
+      {stage === "done" && (downloadedCount === undefined || downloadedCount > 0) && (
         <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-700">
           PPT generated and downloaded successfully.
         </div>

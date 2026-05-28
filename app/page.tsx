@@ -14,6 +14,7 @@ export default function HomePage() {
   const [stage, setStage] = useState<ProgressStage>("idle");
   const [error, setError] = useState("");
   const [fileName, setFileName] = useState("");
+  const [downloadedCount, setDownloadedCount] = useState(0);
 
   // Load templates on mount
   useEffect(() => {
@@ -51,20 +52,84 @@ export default function HomePage() {
     }
   }, []);
 
-  // Handle generate
+  // Download a single image client-side via our proxy, return base64 or null
+  const downloadImageViaProxy = useCallback(
+    async (url: string): Promise<{ url: string; data: string } | null> => {
+      try {
+        const proxyUrl = `/api/image?url=${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl);
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const dataUrl = reader.result as string;
+            // Strip "data:image/jpeg;base64," prefix — just keep the base64
+            const base64 = dataUrl.split(",")[1];
+            if (base64) {
+              resolve({ url, data: base64 });
+            } else {
+              resolve(null);
+            }
+          };
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
+  // Handle generate — downloads images client-side first, then sends to server
   const handleGenerate = useCallback(async () => {
     if (!parsedData) return;
 
     setStage("downloading");
     setError("");
+    setDownloadedCount(0);
 
     try {
+      // Collect all unique image URLs from completed rows
+      const allUrls: string[] = [];
+      for (const row of parsedData.rows) {
+        if (row.replyStatus.toLowerCase().trim() !== "completed") continue;
+        for (const url of row.images) {
+          if (url && !allUrls.includes(url)) allUrls.push(url);
+        }
+      }
+
+      // Download images client-side in batches of 5
+      console.log(`[ppt] Downloading ${allUrls.length} images via proxy...`);
+      const imageMap: Record<string, string> = {};
+      let downloaded = 0;
+      for (let i = 0; i < allUrls.length; i += 5) {
+        const batch = allUrls.slice(i, i + 5);
+        const results = await Promise.all(
+          batch.map((url) => downloadImageViaProxy(url))
+        );
+        for (const result of results) {
+          if (result) {
+            imageMap[result.url] = result.data;
+            downloaded++;
+          }
+        }
+        console.log(`[ppt] Batch done: ${downloaded}/${allUrls.length} downloaded so far`);
+      }
+      console.log(`[ppt] Final: ${downloaded}/${allUrls.length} images downloaded`);
+      setDownloadedCount(downloaded);
+
+      setStage("building");
+
+      // Send parsed data + pre-downloaded images to server
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           data: parsedData,
           templateId: selectedTemplate,
+          images: imageMap,
         }),
       });
 
@@ -79,14 +144,11 @@ export default function HomePage() {
         throw new Error(errMsg || "Generation failed");
       }
 
-      setStage("building");
-
       // Download the PPTX
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
 
-      // Extract filename from Content-Disposition or generate one
       const cd = res.headers.get("Content-Disposition");
       const match = cd?.match(/filename="?([^"]+)"?/);
       a.download = match?.[1] || "Report.pptx";
@@ -101,7 +163,7 @@ export default function HomePage() {
       setError(err instanceof Error ? err.message : "Generation failed");
       setStage("error");
     }
-  }, [parsedData, selectedTemplate]);
+  }, [parsedData, selectedTemplate, downloadImageViaProxy]);
 
   // Count images for progress display
   const imageCount = parsedData
@@ -184,6 +246,7 @@ export default function HomePage() {
         stage={stage}
         error={error}
         imageCount={imageCount}
+        downloadedCount={downloadedCount}
       />
 
       {/* Reset after done */}
