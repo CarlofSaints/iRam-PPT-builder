@@ -35,15 +35,35 @@ export async function POST(req: Request) {
       }
     }
 
+    console.log(`[generate] Found ${allUrls.length} unique image URLs from ${data.rows.filter(r => r.replyStatus.toLowerCase().trim() === "completed").length} completed rows`);
+    if (allUrls.length > 0) {
+      console.log(`[generate] Sample URL: ${allUrls[0]}`);
+    }
+    // Also log rows with images vs without
+    for (const row of data.rows) {
+      if (row.replyStatus.toLowerCase().trim() === "completed") {
+        console.log(`[generate] Store: ${row.store} — ${row.images.length} images: ${row.images.join(", ").substring(0, 200)}`);
+      }
+    }
+
     // Download and process all images
     const imageResults = await downloadAllImages(allUrls);
 
     // Build url → ImageData map
     const imageMap = new Map<string, ImageData>();
+    let successCount = 0;
+    let failCount = 0;
     for (let i = 0; i < allUrls.length; i++) {
       const img = imageResults[i];
-      if (img) imageMap.set(allUrls[i], img);
+      if (img) {
+        imageMap.set(allUrls[i], img);
+        successCount++;
+      } else {
+        failCount++;
+        console.warn(`[generate] FAILED to download: ${allUrls[i]}`);
+      }
     }
+    console.log(`[generate] Images downloaded: ${successCount} success, ${failCount} failed`);
 
     // Build the PPTX
     const pptxBuffer = await buildPptx(data, template, imageMap);
