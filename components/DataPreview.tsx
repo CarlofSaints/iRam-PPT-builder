@@ -54,6 +54,47 @@ export default function DataPreview({ data }: Props) {
         </span>
       </div>
 
+      {/* Image test — first 3 images from completed rows */}
+      {(() => {
+        const sampleImages: string[] = [];
+        for (const r of rows) {
+          if (r.replyStatus.toLowerCase().trim() !== "completed") continue;
+          for (const img of r.images) {
+            if (img && sampleImages.length < 3) sampleImages.push(img);
+          }
+          if (sampleImages.length >= 3) break;
+        }
+        if (sampleImages.length === 0) return null;
+        return (
+          <div className="mt-3">
+            <span className="text-xs text-gray-500">Image access test:</span>
+            <div className="flex gap-2 mt-1">
+              {sampleImages.map((url, i) => (
+                <div key={i} className="relative w-16 h-16 border border-gray-200 rounded overflow-hidden bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url}
+                    alt={`Test ${i + 1}`}
+                    className="w-full h-full object-cover"
+                    onLoad={(e) => {
+                      const el = e.currentTarget.parentElement?.querySelector(".status") as HTMLElement;
+                      if (el) { el.textContent = "OK"; el.className = "status absolute bottom-0 left-0 right-0 text-center text-[8px] bg-green-500 text-white"; }
+                    }}
+                    onError={(e) => {
+                      const el = e.currentTarget.parentElement?.querySelector(".status") as HTMLElement;
+                      if (el) { el.textContent = "BLOCKED"; el.className = "status absolute bottom-0 left-0 right-0 text-center text-[8px] bg-red-500 text-white"; }
+                    }}
+                  />
+                  <span className="status absolute bottom-0 left-0 right-0 text-center text-[8px] bg-gray-300 text-gray-600">
+                    ...
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Store list (collapsed) */}
       {stores.length > 0 && (
         <details className="mt-3">

@@ -52,34 +52,105 @@ export default function HomePage() {
     }
   }, []);
 
-  // Download a single image client-side via our proxy, return base64 or null
-  const downloadImageViaProxy = useCallback(
+  // Convert a blob to base64 string (without the data: prefix)
+  const blobToBase64 = useCallback((blob: Blob): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(",")[1];
+        resolve(base64 || null);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  }, []);
+
+  // Try loading image via <img> tag + canvas (bypasses CORS for loading, extracts via canvas)
+  const downloadViaCanvas = useCallback(
+    (url: string): Promise<{ url: string; data: string } | null> => {
+      return new Promise((resolve) => {
+        let resolved = false;
+        const done = (result: { url: string; data: string } | null) => {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timer);
+          resolve(result);
+        };
+
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) { done(null); return; }
+            ctx.drawImage(img, 0, 0);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+            const base64 = dataUrl.split(",")[1];
+            done(base64 ? { url, data: base64 } : null);
+          } catch {
+            console.warn(`[ppt] Canvas tainted for ${url.substring(0, 60)}`);
+            done(null);
+          }
+        };
+        img.onerror = () => done(null);
+        const timer = setTimeout(() => { img.src = ""; done(null); }, 15000);
+        img.src = url;
+      });
+    },
+    []
+  );
+
+  // Download a single image — tries multiple strategies
+  const downloadImage = useCallback(
     async (url: string): Promise<{ url: string; data: string } | null> => {
+      // Strategy 1: Direct fetch from browser (works if CORS headers present)
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          const blob = await res.blob();
+          const base64 = await blobToBase64(blob);
+          if (base64) {
+            console.log(`[ppt] Direct fetch OK: ${url.substring(0, 60)}`);
+            return { url, data: base64 };
+          }
+        }
+      } catch {
+        // CORS or network error — expected, try next strategy
+      }
+
+      // Strategy 2: Canvas approach (loads via <img> tag, extract via canvas)
+      const canvasResult = await downloadViaCanvas(url);
+      if (canvasResult) {
+        console.log(`[ppt] Canvas OK: ${url.substring(0, 60)}`);
+        return canvasResult;
+      }
+
+      // Strategy 3: Server proxy (adds User-Agent + Referer headers)
       try {
         const proxyUrl = `/api/image?url=${encodeURIComponent(url)}`;
         const res = await fetch(proxyUrl);
-        if (!res.ok) return null;
-        const blob = await res.blob();
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const dataUrl = reader.result as string;
-            // Strip "data:image/jpeg;base64," prefix — just keep the base64
-            const base64 = dataUrl.split(",")[1];
-            if (base64) {
-              resolve({ url, data: base64 });
-            } else {
-              resolve(null);
-            }
-          };
-          reader.onerror = () => resolve(null);
-          reader.readAsDataURL(blob);
-        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const base64 = await blobToBase64(blob);
+          if (base64) {
+            console.log(`[ppt] Proxy OK: ${url.substring(0, 60)}`);
+            return { url, data: base64 };
+          }
+        } else {
+          console.warn(`[ppt] Proxy failed (${res.status}): ${url.substring(0, 60)}`);
+        }
       } catch {
-        return null;
+        // Proxy also failed
       }
+
+      console.warn(`[ppt] ALL strategies failed: ${url.substring(0, 60)}`);
+      return null;
     },
-    []
+    [blobToBase64, downloadViaCanvas]
   );
 
   // Handle generate — downloads images client-side first, then sends to server
@@ -107,7 +178,7 @@ export default function HomePage() {
       for (let i = 0; i < allUrls.length; i += 5) {
         const batch = allUrls.slice(i, i + 5);
         const results = await Promise.all(
-          batch.map((url) => downloadImageViaProxy(url))
+          batch.map((url) => downloadImage(url))
         );
         for (const result of results) {
           if (result) {
@@ -163,7 +234,7 @@ export default function HomePage() {
       setError(err instanceof Error ? err.message : "Generation failed");
       setStage("error");
     }
-  }, [parsedData, selectedTemplate, downloadImageViaProxy]);
+  }, [parsedData, selectedTemplate, downloadImage]);
 
   // Count images for progress display
   const imageCount = parsedData
