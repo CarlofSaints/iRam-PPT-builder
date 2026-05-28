@@ -4,8 +4,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /api/image?url=<perigee-portal-url>
- * Proxies images from live.perigeeportal.co.za so the browser can display
- * them without CORS issues. Caches for 24 hours.
+ *
+ * If IMAGE_PROXY_URL env var is set (Cloudflare Worker), forwards through that.
+ * Otherwise tries to fetch directly from Perigee (may get 403 from datacenter IPs).
  */
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -16,16 +17,25 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const upstream = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        Referer: "https://live.perigeeportal.co.za/",
-        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-      },
-    });
+    let upstream: Response;
 
-    console.log(`[image-proxy] ${url.substring(0, 80)}... → ${upstream.status}`);
+    const externalProxy = process.env.IMAGE_PROXY_URL;
+    if (externalProxy) {
+      // Route through Cloudflare Worker (different IP range, not blocked)
+      const proxyUrl = `${externalProxy}?url=${encodeURIComponent(url)}`;
+      upstream = await fetch(proxyUrl);
+      console.log(`[image-proxy] External proxy: ${url.substring(0, 60)}... → ${upstream.status}`);
+    } else {
+      // Direct fetch (will likely get 403 from Vercel datacenter IPs)
+      upstream = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+          Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        },
+      });
+      console.log(`[image-proxy] Direct: ${url.substring(0, 60)}... → ${upstream.status}`);
+    }
 
     if (!upstream.ok) {
       return new NextResponse(`Upstream error: ${upstream.status}`, {
