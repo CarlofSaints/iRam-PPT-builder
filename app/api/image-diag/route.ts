@@ -1,39 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getPerigeeSession, getPerigeeSessionCookie } from "@/lib/perigeeAuth";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/image-diag?url=<perigee-image-url>
  *
- * Diagnostic endpoint — tests each hop in the image proxy chain and reports
- * where it's failing.
- *
- * Without a URL param: just checks env var status + worker reachability.
- * With a URL param: tests full chain end-to-end.
+ * Diagnostic endpoint — tests each hop in the image proxy chain.
+ * Uses the same cookie resolution as the real /api/image route (blob first, env fallback).
  */
 export async function GET(req: NextRequest) {
   const testUrl = req.nextUrl.searchParams.get("url");
 
   const proxyUrl = process.env.IMAGE_PROXY_URL ?? "";
-  const sessionCookie = process.env.PERIGEE_SESSION_COOKIE ?? "";
+  const envCookie = process.env.PERIGEE_SESSION_COOKIE ?? "";
+  const blobSession = await getPerigeeSession();
+  const activeCookie = await getPerigeeSessionCookie();
 
   const report: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
     env: {
-      IMAGE_PROXY_URL: proxyUrl ? `set (${proxyUrl.length} chars): ${proxyUrl.substring(0, 50)}...` : "NOT SET",
-      PERIGEE_SESSION_COOKIE: sessionCookie
-        ? `set (${sessionCookie.length} chars): ${sessionCookie.substring(0, 20)}...${sessionCookie.substring(sessionCookie.length - 10)}`
+      IMAGE_PROXY_URL: proxyUrl ? `set (${proxyUrl.length} chars)` : "NOT SET",
+      PERIGEE_SESSION_COOKIE_ENV: envCookie
+        ? `set (${envCookie.length} chars): ${envCookie.substring(0, 20)}...`
         : "NOT SET",
     },
+    blobSession: blobSession
+      ? {
+          loggedInBy: blobSession.loggedInBy,
+          loggedInAt: blobSession.loggedInAt,
+          cookieLength: blobSession.cookie.length,
+          cookiePreview: `${blobSession.cookie.substring(0, 20)}...`,
+        }
+      : "NO BLOB SESSION",
+    activeCookieSource: blobSession?.cookie ? "blob" : envCookie ? "env" : "NONE",
+    activeCookieLength: activeCookie?.length ?? 0,
   };
 
-  // Step 1: Ping the Cloudflare Worker (no image URL, should return 400 "Missing url param")
+  // Step 1: Ping the Cloudflare Worker
   if (proxyUrl) {
     try {
       const pingRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(10_000) });
       report.workerPing = {
         status: pingRes.status,
-        statusText: pingRes.statusText,
         body: await pingRes.text().then((t) => t.substring(0, 200)),
         ok: "Worker is reachable",
       };
@@ -43,21 +52,18 @@ export async function GET(req: NextRequest) {
         hint: "Cannot reach Cloudflare Worker — is it deployed?",
       };
     }
-  } else {
-    report.workerPing = { error: "IMAGE_PROXY_URL not set, skipping worker ping" };
   }
 
-  // Step 2: If a test image URL was provided, try the full chain
-  if (testUrl && proxyUrl && sessionCookie) {
+  // Step 2: Test full chain with the ACTIVE cookie (same one /api/image uses)
+  if (testUrl && proxyUrl && activeCookie) {
     try {
       const fullUrl = `${proxyUrl}?url=${encodeURIComponent(testUrl)}`;
-      const headers: Record<string, string> = {
-        "X-Perigee-Cookie": sessionCookie,
-      };
-      const res = await fetch(fullUrl, { headers, signal: AbortSignal.timeout(15_000) });
+      const res = await fetch(fullUrl, {
+        headers: { "X-Perigee-Cookie": activeCookie },
+        signal: AbortSignal.timeout(15_000),
+      });
 
       const contentType = res.headers.get("content-type") ?? "unknown";
-      const contentLength = res.headers.get("content-length") ?? "unknown";
 
       if (res.ok) {
         const body = await res.arrayBuffer();
@@ -66,21 +72,15 @@ export async function GET(req: NextRequest) {
           contentType,
           bodySize: body.byteLength,
           ok: `Image fetched successfully (${body.byteLength} bytes)`,
-          isImage: contentType.startsWith("image/"),
         };
       } else {
         const text = await res.text();
         report.fullChain = {
           status: res.status,
-          statusText: res.statusText,
-          contentType,
-          contentLength,
           body: text.substring(0, 500),
           hint: res.status === 502
-            ? "502 from worker — Perigee rejected the request (expired cookie? wrong cookie format?)"
-            : res.status === 403
-              ? "403 — domain validation failed"
-              : `Unexpected status ${res.status}`,
+            ? "502 — Perigee rejected the request (expired/wrong cookie)"
+            : `Unexpected status ${res.status}`,
         };
       }
     } catch (err: unknown) {
@@ -88,36 +88,10 @@ export async function GET(req: NextRequest) {
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  } else if (testUrl && !sessionCookie) {
-    report.fullChain = { error: "PERIGEE_SESSION_COOKIE not set, cannot test full chain" };
-  } else if (testUrl && !proxyUrl) {
-    report.fullChain = { error: "IMAGE_PROXY_URL not set, cannot test full chain" };
-  } else {
-    report.fullChain = { skipped: "No test URL provided. Add ?url=<perigee-image-url> to test full chain." };
-  }
-
-  // Step 3: Try direct Perigee fetch (for comparison — will likely fail from Vercel IPs)
-  if (testUrl) {
-    try {
-      const headers: Record<string, string> = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      };
-      if (sessionCookie) headers["Cookie"] = sessionCookie;
-
-      const res = await fetch(testUrl, { headers, signal: AbortSignal.timeout(10_000) });
-      report.directFetch = {
-        status: res.status,
-        contentType: res.headers.get("content-type") ?? "unknown",
-        hint: res.ok
-          ? "Direct fetch works (unexpected — Perigee allows Vercel IPs)"
-          : "Direct fetch blocked (expected — this is why we need the Cloudflare Worker)",
-      };
-    } catch (err: unknown) {
-      report.directFetch = {
-        error: err instanceof Error ? err.message : String(err),
-        hint: "Direct fetch failed (expected)",
-      };
-    }
+  } else if (testUrl && !activeCookie) {
+    report.fullChain = { error: "No active cookie (neither blob nor env var)" };
+  } else if (!testUrl) {
+    report.fullChain = { skipped: "Add ?url=<perigee-image-url> to test full chain." };
   }
 
   return NextResponse.json(report, {
