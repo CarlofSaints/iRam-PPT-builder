@@ -11,22 +11,20 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   const session = await getPerigeeSession();
-  const envCookie = process.env.PERIGEE_SESSION_COOKIE;
 
   return NextResponse.json({
     connected: !!session?.cookie,
     loggedInAt: session?.loggedInAt ?? null,
     loggedInBy: session?.loggedInBy ?? null,
-    hasEnvFallback: !!envCookie,
   });
 }
 
 /**
- * POST /api/perigee-auth — Save Perigee session cookie.
+ * POST /api/perigee-auth — Authenticate with Perigee.
  *
  * Accepts either:
  *   { cookie: "SSESS...=value" }           — manual cookie paste
- *   { username: string, password: string }  — automated login via Cloudflare Worker
+ *   { username: string, password: string }  — automated login via Railway proxy
  */
 export async function POST(req: NextRequest) {
   let body: { cookie?: string; username?: string; password?: string };
@@ -44,13 +42,19 @@ export async function POST(req: NextRequest) {
     const cookie = body.cookie.trim();
     if (!cookie.startsWith("SSESS")) {
       return NextResponse.json(
-        { error: "Cookie must start with SSESS. Copy the full cookie name=value from your browser." },
+        {
+          error:
+            "Cookie must start with SSESS. Copy the full cookie name=value from your browser.",
+        },
         { status: 400 }
       );
     }
     if (!cookie.includes("=")) {
       return NextResponse.json(
-        { error: "Cookie must be in name=value format (e.g. SSESS12ca...=abc123...)" },
+        {
+          error:
+            "Cookie must be in name=value format (e.g. SSESS12ca...=abc123...)",
+        },
         { status: 400 }
       );
     }
@@ -68,7 +72,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // ── Automated login via Cloudflare Worker ────────────
+  // ── Automated login via Railway proxy ────────────────
   const { username, password } = body;
   if (!username || !password) {
     return NextResponse.json(
@@ -78,6 +82,7 @@ export async function POST(req: NextRequest) {
   }
 
   const proxyUrl = process.env.IMAGE_PROXY_URL;
+  const proxyKey = process.env.IMAGE_PROXY_API_KEY;
   if (!proxyUrl) {
     return NextResponse.json(
       { error: "IMAGE_PROXY_URL not configured" },
@@ -86,12 +91,18 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // First try the normal login endpoint
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (proxyKey) {
+      headers["x-api-key"] = proxyKey;
+    }
+
     const res = await fetch(`${proxyUrl}/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-      signal: AbortSignal.timeout(20_000),
+      headers,
+      body: JSON.stringify({ username, password, debug: true }),
+      signal: AbortSignal.timeout(25_000),
     });
 
     const data = await res.json();
@@ -110,45 +121,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Login failed — try debug endpoint for diagnostics
-    let debugInfo = null;
-    try {
-      const debugRes = await fetch(`${proxyUrl}/login-debug`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      const debugData = await debugRes.json();
-      debugInfo = debugData.diag || null;
-
-      // If debug endpoint actually succeeded where normal didn't, save it
-      if (debugData.ok && debugData.cookie) {
-        await savePerigeeSession({
-          cookie: debugData.cookie,
-          loggedInAt: new Date().toISOString(),
-          loggedInBy: username,
-        });
-        return NextResponse.json({
-          ok: true,
-          loggedInAt: new Date().toISOString(),
-          loggedInBy: username,
-        });
-      }
-    } catch {
-      // debug endpoint failed too, that's fine
-    }
-
     return NextResponse.json(
-      { error: data.error || "Login failed", debug: debugInfo },
-      { status: res.status === 200 ? 401 : res.status }
+      { error: data.error || "Login failed", debug: data.debug || null },
+      { status: 401 }
     );
   } catch (err) {
     console.error("Perigee login error:", err);
     return NextResponse.json(
       {
         error:
-          err instanceof Error ? err.message : "Failed to connect to Perigee",
+          err instanceof Error
+            ? err.message
+            : "Failed to connect to proxy",
       },
       { status: 502 }
     );

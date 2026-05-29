@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/image?url=<perigee-portal-url>
  *
- * Routes through Cloudflare Worker (IMAGE_PROXY_URL) with Perigee session
- * cookie. Reads cookie from blob first, falls back to env var.
+ * Routes through Railway proxy (IMAGE_PROXY_URL) with Perigee session cookie.
+ * Reads cookie from blob first, falls back to env var.
  */
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -18,28 +18,37 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const externalProxy = process.env.IMAGE_PROXY_URL;
+    const proxyUrl = process.env.IMAGE_PROXY_URL;
+    const proxyKey = process.env.IMAGE_PROXY_API_KEY;
     const sessionCookie = await getPerigeeSessionCookie();
 
-    const headers: Record<string, string> = {};
-    if (sessionCookie) {
-      headers["X-Perigee-Cookie"] = sessionCookie;
+    if (!sessionCookie) {
+      return new NextResponse("No Perigee session — log in via Control Centre", {
+        status: 401,
+      });
     }
 
     let upstream: Response;
 
-    if (externalProxy) {
-      // Route through Cloudflare Worker with session cookie
-      const proxyUrl = `${externalProxy}?url=${encodeURIComponent(url)}`;
-      upstream = await fetch(proxyUrl, { headers });
+    if (proxyUrl) {
+      // Route through Railway proxy
+      const fullUrl = `${proxyUrl}/image?url=${encodeURIComponent(url)}`;
+      const headers: Record<string, string> = {
+        "x-perigee-cookie": sessionCookie,
+      };
+      if (proxyKey) {
+        headers["x-api-key"] = proxyKey;
+      }
+      upstream = await fetch(fullUrl, { headers });
     } else {
       // Direct fetch (fallback — likely blocked by Perigee)
-      if (sessionCookie) {
-        headers["Cookie"] = sessionCookie;
-      }
-      headers["User-Agent"] =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
-      upstream = await fetch(url, { headers });
+      upstream = await fetch(url, {
+        headers: {
+          Cookie: sessionCookie,
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        },
+      });
     }
 
     if (!upstream.ok) {
