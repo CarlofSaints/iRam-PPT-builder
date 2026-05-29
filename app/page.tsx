@@ -80,10 +80,11 @@ export default function HomePage() {
             return { url, data: base64 };
           }
         } else {
-          console.warn(`[ppt] Proxy failed (${res.status}): ${url.substring(0, 60)}`);
+          const errText = await res.text().catch(() => "");
+          console.warn(`[ppt] Proxy failed (${res.status}): ${url.substring(0, 80)} — ${errText.substring(0, 200)}`);
         }
-      } catch {
-        console.warn(`[ppt] Proxy error: ${url.substring(0, 60)}`);
+      } catch (e) {
+        console.warn(`[ppt] Proxy error: ${url.substring(0, 80)}`, e);
       }
       return null;
     },
@@ -110,8 +111,10 @@ export default function HomePage() {
 
       // Download images client-side in batches of 5
       console.log(`[ppt] Downloading ${allUrls.length} images via proxy...`);
+      console.log(`[ppt] First URL: ${allUrls[0]?.substring(0, 100)}`);
       const imageMap: Record<string, string> = {};
       let downloaded = 0;
+      let failedStatuses: string[] = [];
       for (let i = 0; i < allUrls.length; i += 5) {
         const batch = allUrls.slice(i, i + 5);
         const results = await Promise.all(
@@ -126,6 +129,9 @@ export default function HomePage() {
         console.log(`[ppt] Batch done: ${downloaded}/${allUrls.length} downloaded so far`);
       }
       console.log(`[ppt] Final: ${downloaded}/${allUrls.length} images downloaded`);
+      if (failedStatuses.length > 0) {
+        console.warn(`[ppt] Failed statuses: ${[...new Set(failedStatuses)].join(", ")}`)
+      }
       setDownloadedCount(downloaded);
 
       setStage("building");
