@@ -47,7 +47,12 @@ export default function HomePage() {
       setParsedData(json as ParsedData);
       setStage("idle");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Parse failed");
+      const msg = err instanceof Error ? err.message : "Parse failed";
+      if (msg === "Failed to fetch") {
+        setError("Please close the file you are trying to upload and try again!");
+      } else {
+        setError(msg);
+      }
       setStage("error");
     }
   }, []);
