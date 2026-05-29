@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getPerigeeSessionCookie } from "@/lib/perigeeAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -6,7 +7,7 @@ export const dynamic = "force-dynamic";
  * GET /api/image?url=<perigee-portal-url>
  *
  * Routes through Cloudflare Worker (IMAGE_PROXY_URL) with Perigee session
- * cookie (PERIGEE_SESSION_COOKIE) for authentication.
+ * cookie. Reads cookie from blob first, falls back to env var.
  */
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const externalProxy = process.env.IMAGE_PROXY_URL;
-    const sessionCookie = process.env.PERIGEE_SESSION_COOKIE;
+    const sessionCookie = await getPerigeeSessionCookie();
 
     const headers: Record<string, string> = {};
     if (sessionCookie) {
@@ -40,8 +41,6 @@ export async function GET(req: NextRequest) {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
       upstream = await fetch(url, { headers });
     }
-
-    console.log(`[image-proxy] ${url.substring(0, 60)}... → ${upstream.status}`);
 
     if (!upstream.ok) {
       return new NextResponse(`Upstream error: ${upstream.status}`, {
