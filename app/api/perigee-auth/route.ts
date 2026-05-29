@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // First try the normal login endpoint
     const res = await fetch(`${proxyUrl}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -95,24 +96,53 @@ export async function POST(req: NextRequest) {
 
     const data = await res.json();
 
-    if (!res.ok || !data.ok) {
-      return NextResponse.json(
-        { error: data.error || "Login failed" },
-        { status: res.status === 200 ? 401 : res.status }
-      );
+    if (data.ok && data.cookie) {
+      await savePerigeeSession({
+        cookie: data.cookie,
+        loggedInAt: new Date().toISOString(),
+        loggedInBy: username,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        loggedInAt: new Date().toISOString(),
+        loggedInBy: username,
+      });
     }
 
-    await savePerigeeSession({
-      cookie: data.cookie,
-      loggedInAt: new Date().toISOString(),
-      loggedInBy: username,
-    });
+    // Login failed — try debug endpoint for diagnostics
+    let debugInfo = null;
+    try {
+      const debugRes = await fetch(`${proxyUrl}/login-debug`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const debugData = await debugRes.json();
+      debugInfo = debugData.diag || null;
 
-    return NextResponse.json({
-      ok: true,
-      loggedInAt: new Date().toISOString(),
-      loggedInBy: username,
-    });
+      // If debug endpoint actually succeeded where normal didn't, save it
+      if (debugData.ok && debugData.cookie) {
+        await savePerigeeSession({
+          cookie: debugData.cookie,
+          loggedInAt: new Date().toISOString(),
+          loggedInBy: username,
+        });
+        return NextResponse.json({
+          ok: true,
+          loggedInAt: new Date().toISOString(),
+          loggedInBy: username,
+        });
+      }
+    } catch {
+      // debug endpoint failed too, that's fine
+    }
+
+    return NextResponse.json(
+      { error: data.error || "Login failed", debug: debugInfo },
+      { status: res.status === 200 ? 401 : res.status }
+    );
   } catch (err) {
     console.error("Perigee login error:", err);
     return NextResponse.json(

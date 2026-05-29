@@ -30,6 +30,8 @@ export default function ControlCentrePage() {
   const [pgLoggingIn, setPgLoggingIn] = useState(false);
   const [pgError, setPgError] = useState("");
   const [pgSuccess, setPgSuccess] = useState("");
+  const [pgDebug, setPgDebug] = useState<Record<string, unknown> | null>(null);
+  const [showCookieFallback, setShowCookieFallback] = useState(false);
   const [pgCookie, setPgCookie] = useState("");
   const [pgPasting, setPgPasting] = useState(false);
 
@@ -66,6 +68,7 @@ export default function ControlCentrePage() {
     setPgLoggingIn(true);
     setPgError("");
     setPgSuccess("");
+    setPgDebug(null);
 
     try {
       const res = await fetch("/api/perigee-auth", {
@@ -77,6 +80,7 @@ export default function ControlCentrePage() {
 
       if (!res.ok || data.error) {
         setPgError(data.error || "Login failed");
+        if (data.debug) setPgDebug(data.debug);
       } else {
         setPgSuccess("Connected to Perigee successfully");
         setPgPass("");
@@ -107,6 +111,7 @@ export default function ControlCentrePage() {
       } else {
         setPgSuccess("Cookie saved — Perigee connection active");
         setPgCookie("");
+        setShowCookieFallback(false);
         await loadPerigeeStatus();
       }
     } catch {
@@ -194,8 +199,8 @@ export default function ControlCentrePage() {
         </div>
 
         <p className="text-xs text-gray-500">
-          Paste your Perigee session cookie to enable image downloads for PPT
-          reports. The session will be shared across all users of this app.
+          Log in with your Perigee credentials to enable image downloads for
+          PPT reports. The session is shared across all users of this app.
         </p>
 
         {perigeeStatus?.connected && perigeeStatus.loggedInAt && (
@@ -208,47 +213,134 @@ export default function ControlCentrePage() {
           </div>
         )}
 
-        {/* How-to instructions */}
-        <div className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-md px-3 py-2 space-y-1">
-          <p className="font-medium text-blue-700">How to get the cookie:</p>
-          <ol className="list-decimal list-inside space-y-0.5 text-blue-600">
-            <li>Log into <span className="font-medium">live.perigeeportal.co.za</span> in your browser</li>
-            <li>Press <span className="font-mono bg-blue-100 px-1 rounded">F12</span> → Application tab → Cookies → click the Perigee URL</li>
-            <li>Find the cookie starting with <span className="font-mono bg-blue-100 px-1 rounded">SSESS</span></li>
-            <li>Copy the <strong>Name</strong> and <strong>Value</strong> as: <span className="font-mono bg-blue-100 px-1 rounded">Name=Value</span></li>
-          </ol>
-        </div>
-
-        {/* Cookie paste input */}
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">
-            Session Cookie
-          </label>
-          <input
-            type="text"
-            value={pgCookie}
-            onChange={(e) => setPgCookie(e.target.value)}
-            placeholder="SSESS12ca17b49af2289436f303e0166030a2=your-cookie-value-here"
-            disabled={pgPasting}
-            onKeyDown={(e) => e.key === "Enter" && handleCookiePaste()}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#7CC042] disabled:opacity-50"
-          />
+        {/* Login form — primary method */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Perigee Username
+            </label>
+            <input
+              type="text"
+              value={pgUser}
+              onChange={(e) => setPgUser(e.target.value)}
+              placeholder="e.g. carl@outerjoin.co.za"
+              disabled={pgLoggingIn}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#7CC042] disabled:opacity-50"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Perigee Password
+            </label>
+            <input
+              type="password"
+              value={pgPass}
+              onChange={(e) => setPgPass(e.target.value)}
+              placeholder="Enter password"
+              disabled={pgLoggingIn}
+              onKeyDown={(e) => e.key === "Enter" && handlePerigeeLogin()}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#7CC042] disabled:opacity-50"
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
           <button
-            onClick={handleCookiePaste}
-            disabled={pgPasting || !pgCookie.trim()}
+            onClick={handlePerigeeLogin}
+            disabled={pgLoggingIn || !pgUser.trim() || !pgPass}
             className="px-4 py-2 bg-[#7CC042] text-white text-sm font-semibold rounded-md hover:bg-[#5a9a2e] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {pgPasting ? "Saving..." : "Save Cookie"}
+            {pgLoggingIn ? "Connecting..." : "Connect to Perigee"}
           </button>
 
-          {pgError && (
-            <p className="text-xs text-red-600">{pgError}</p>
-          )}
-          {pgSuccess && (
-            <p className="text-xs text-green-600">{pgSuccess}</p>
+          {pgError && <p className="text-xs text-red-600">{pgError}</p>}
+          {pgSuccess && <p className="text-xs text-green-600">{pgSuccess}</p>}
+        </div>
+
+        {/* Debug output when login fails */}
+        {pgDebug && (
+          <details className="text-xs">
+            <summary className="text-gray-400 cursor-pointer hover:text-gray-600">
+              Debug info (click to expand)
+            </summary>
+            <pre className="mt-2 bg-gray-50 border border-gray-200 rounded-md p-3 overflow-x-auto text-[10px] text-gray-600 max-h-60 overflow-y-auto">
+              {JSON.stringify(pgDebug, null, 2)}
+            </pre>
+          </details>
+        )}
+
+        {/* Fallback: manual cookie paste */}
+        <div className="border-t border-gray-100 pt-3">
+          <button
+            onClick={() => setShowCookieFallback(!showCookieFallback)}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            {showCookieFallback
+              ? "Hide manual cookie paste"
+              : "Login not working? Paste cookie manually"}
+          </button>
+
+          {showCookieFallback && (
+            <div className="mt-3 space-y-3">
+              <div className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-md px-3 py-2 space-y-1">
+                <p className="font-medium text-blue-700">
+                  How to get the cookie:
+                </p>
+                <ol className="list-decimal list-inside space-y-0.5 text-blue-600">
+                  <li>
+                    Log into{" "}
+                    <span className="font-medium">
+                      live.perigeeportal.co.za
+                    </span>{" "}
+                    in your browser
+                  </li>
+                  <li>
+                    Press{" "}
+                    <span className="font-mono bg-blue-100 px-1 rounded">
+                      F12
+                    </span>{" "}
+                    &rarr; Application tab &rarr; Cookies &rarr; click the
+                    Perigee URL
+                  </li>
+                  <li>
+                    Find the cookie starting with{" "}
+                    <span className="font-mono bg-blue-100 px-1 rounded">
+                      SSESS
+                    </span>
+                  </li>
+                  <li>
+                    Copy the <strong>Name</strong> and <strong>Value</strong>{" "}
+                    as:{" "}
+                    <span className="font-mono bg-blue-100 px-1 rounded">
+                      Name=Value
+                    </span>
+                  </li>
+                </ol>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Session Cookie
+                </label>
+                <input
+                  type="text"
+                  value={pgCookie}
+                  onChange={(e) => setPgCookie(e.target.value)}
+                  placeholder="SSESS12ca17b49af2289436f303e0166030a2=your-cookie-value-here"
+                  disabled={pgPasting}
+                  onKeyDown={(e) => e.key === "Enter" && handleCookiePaste()}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#7CC042] disabled:opacity-50"
+                />
+              </div>
+
+              <button
+                onClick={handleCookiePaste}
+                disabled={pgPasting || !pgCookie.trim()}
+                className="px-4 py-2 bg-gray-600 text-white text-sm font-semibold rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {pgPasting ? "Saving..." : "Save Cookie"}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -290,12 +382,16 @@ export default function ControlCentrePage() {
                 <input
                   type="color"
                   value={`#${newPrimary}`}
-                  onChange={(e) => setNewPrimary(e.target.value.replace("#", ""))}
+                  onChange={(e) =>
+                    setNewPrimary(e.target.value.replace("#", ""))
+                  }
                   className="w-8 h-8 rounded cursor-pointer border border-gray-300"
                 />
                 <input
                   value={newPrimary}
-                  onChange={(e) => setNewPrimary(e.target.value.replace("#", ""))}
+                  onChange={(e) =>
+                    setNewPrimary(e.target.value.replace("#", ""))
+                  }
                   className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
                   maxLength={6}
                 />
@@ -309,12 +405,16 @@ export default function ControlCentrePage() {
                 <input
                   type="color"
                   value={`#${newAccent}`}
-                  onChange={(e) => setNewAccent(e.target.value.replace("#", ""))}
+                  onChange={(e) =>
+                    setNewAccent(e.target.value.replace("#", ""))
+                  }
                   className="w-8 h-8 rounded cursor-pointer border border-gray-300"
                 />
                 <input
                   value={newAccent}
-                  onChange={(e) => setNewAccent(e.target.value.replace("#", ""))}
+                  onChange={(e) =>
+                    setNewAccent(e.target.value.replace("#", ""))
+                  }
                   className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
                   maxLength={6}
                 />
