@@ -22,10 +22,61 @@ export async function GET() {
 }
 
 /**
- * POST /api/perigee-auth — Log in to Perigee via Cloudflare Worker.
- * Body: { username: string, password: string }
+ * POST /api/perigee-auth — Save Perigee session cookie.
+ *
+ * Accepts either:
+ *   { cookie: "SSESS...=value" }           — manual cookie paste
+ *   { username: string, password: string }  — automated login via Cloudflare Worker
  */
 export async function POST(req: NextRequest) {
+  let body: { cookie?: string; username?: string; password?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid request body" },
+      { status: 400 }
+    );
+  }
+
+  // ── Manual cookie paste ──────────────────────────────
+  if (body.cookie) {
+    const cookie = body.cookie.trim();
+    if (!cookie.startsWith("SSESS")) {
+      return NextResponse.json(
+        { error: "Cookie must start with SSESS. Copy the full cookie name=value from your browser." },
+        { status: 400 }
+      );
+    }
+    if (!cookie.includes("=")) {
+      return NextResponse.json(
+        { error: "Cookie must be in name=value format (e.g. SSESS12ca...=abc123...)" },
+        { status: 400 }
+      );
+    }
+
+    await savePerigeeSession({
+      cookie,
+      loggedInAt: new Date().toISOString(),
+      loggedInBy: "manual paste",
+    });
+
+    return NextResponse.json({
+      ok: true,
+      loggedInAt: new Date().toISOString(),
+      loggedInBy: "manual paste",
+    });
+  }
+
+  // ── Automated login via Cloudflare Worker ────────────
+  const { username, password } = body;
+  if (!username || !password) {
+    return NextResponse.json(
+      { error: "Provide either { cookie } or { username, password }" },
+      { status: 400 }
+    );
+  }
+
   const proxyUrl = process.env.IMAGE_PROXY_URL;
   if (!proxyUrl) {
     return NextResponse.json(
@@ -34,28 +85,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let username: string;
-  let password: string;
   try {
-    const body = await req.json();
-    username = body.username;
-    password = body.password;
-  } catch {
-    return NextResponse.json(
-      { error: "Invalid request body" },
-      { status: 400 }
-    );
-  }
-
-  if (!username || !password) {
-    return NextResponse.json(
-      { error: "Username and password are required" },
-      { status: 400 }
-    );
-  }
-
-  try {
-    // Forward login to Cloudflare Worker
     const res = await fetch(`${proxyUrl}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -72,7 +102,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Store the session cookie in blob
     await savePerigeeSession({
       cookie: data.cookie,
       loggedInAt: new Date().toISOString(),

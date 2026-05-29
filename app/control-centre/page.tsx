@@ -30,6 +30,8 @@ export default function ControlCentrePage() {
   const [pgLoggingIn, setPgLoggingIn] = useState(false);
   const [pgError, setPgError] = useState("");
   const [pgSuccess, setPgSuccess] = useState("");
+  const [pgCookie, setPgCookie] = useState("");
+  const [pgPasting, setPgPasting] = useState(false);
 
   const loadTemplates = useCallback(async () => {
     setLoading(true);
@@ -84,6 +86,33 @@ export default function ControlCentrePage() {
       setPgError("Network error — could not reach server");
     }
     setPgLoggingIn(false);
+  };
+
+  const handleCookiePaste = async () => {
+    if (!pgCookie.trim()) return;
+    setPgPasting(true);
+    setPgError("");
+    setPgSuccess("");
+
+    try {
+      const res = await fetch("/api/perigee-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookie: pgCookie.trim() }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        setPgError(data.error || "Failed to save cookie");
+      } else {
+        setPgSuccess("Cookie saved — Perigee connection active");
+        setPgCookie("");
+        await loadPerigeeStatus();
+      }
+    } catch {
+      setPgError("Network error — could not reach server");
+    }
+    setPgPasting(false);
   };
 
   const handleCreate = async () => {
@@ -165,7 +194,7 @@ export default function ControlCentrePage() {
         </div>
 
         <p className="text-xs text-gray-500">
-          Log in with your Perigee credentials to enable image downloads for PPT
+          Paste your Perigee session cookie to enable image downloads for PPT
           reports. The session will be shared across all users of this app.
         </p>
 
@@ -179,43 +208,40 @@ export default function ControlCentrePage() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Perigee Username
-            </label>
-            <input
-              type="text"
-              value={pgUser}
-              onChange={(e) => setPgUser(e.target.value)}
-              placeholder="e.g. carl@outerjoin.co.za"
-              disabled={pgLoggingIn}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#7CC042] disabled:opacity-50"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Perigee Password
-            </label>
-            <input
-              type="password"
-              value={pgPass}
-              onChange={(e) => setPgPass(e.target.value)}
-              placeholder="Enter password"
-              disabled={pgLoggingIn}
-              onKeyDown={(e) => e.key === "Enter" && handlePerigeeLogin()}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#7CC042] disabled:opacity-50"
-            />
-          </div>
+        {/* How-to instructions */}
+        <div className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-md px-3 py-2 space-y-1">
+          <p className="font-medium text-blue-700">How to get the cookie:</p>
+          <ol className="list-decimal list-inside space-y-0.5 text-blue-600">
+            <li>Log into <span className="font-medium">live.perigeeportal.co.za</span> in your browser</li>
+            <li>Press <span className="font-mono bg-blue-100 px-1 rounded">F12</span> → Application tab → Cookies → click the Perigee URL</li>
+            <li>Find the cookie starting with <span className="font-mono bg-blue-100 px-1 rounded">SSESS</span></li>
+            <li>Copy the <strong>Name</strong> and <strong>Value</strong> as: <span className="font-mono bg-blue-100 px-1 rounded">Name=Value</span></li>
+          </ol>
+        </div>
+
+        {/* Cookie paste input */}
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">
+            Session Cookie
+          </label>
+          <input
+            type="text"
+            value={pgCookie}
+            onChange={(e) => setPgCookie(e.target.value)}
+            placeholder="SSESS12ca17b49af2289436f303e0166030a2=your-cookie-value-here"
+            disabled={pgPasting}
+            onKeyDown={(e) => e.key === "Enter" && handleCookiePaste()}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#7CC042] disabled:opacity-50"
+          />
         </div>
 
         <div className="flex items-center gap-3">
           <button
-            onClick={handlePerigeeLogin}
-            disabled={pgLoggingIn || !pgUser.trim() || !pgPass}
+            onClick={handleCookiePaste}
+            disabled={pgPasting || !pgCookie.trim()}
             className="px-4 py-2 bg-[#7CC042] text-white text-sm font-semibold rounded-md hover:bg-[#5a9a2e] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {pgLoggingIn ? "Connecting..." : "Connect to Perigee"}
+            {pgPasting ? "Saving..." : "Save Cookie"}
           </button>
 
           {pgError && (
