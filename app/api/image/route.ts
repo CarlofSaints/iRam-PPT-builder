@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPerigeeSessionCookie } from "@/lib/perigeeAuth";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/image?url=<perigee-portal-url>
  *
- * Routes through Railway proxy (IMAGE_PROXY_URL) with Perigee session cookie.
- * Reads cookie from blob first, falls back to env var.
+ * Routes through Railway proxy (IMAGE_PROXY_URL).
+ * Perigee image URLs are public — no session cookie needed.
  */
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -20,31 +19,19 @@ export async function GET(req: NextRequest) {
   try {
     const proxyUrl = process.env.IMAGE_PROXY_URL;
     const proxyKey = process.env.IMAGE_PROXY_API_KEY;
-    const sessionCookie = await getPerigeeSessionCookie();
-
-    if (!sessionCookie) {
-      return new NextResponse("No Perigee session — log in via Control Centre", {
-        status: 401,
-      });
-    }
 
     let upstream: Response;
 
     if (proxyUrl) {
       // Route through Railway proxy
       const fullUrl = `${proxyUrl}/image?url=${encodeURIComponent(url)}`;
-      const headers: Record<string, string> = {
-        "x-perigee-cookie": sessionCookie,
-      };
-      if (proxyKey) {
-        headers["x-api-key"] = proxyKey;
-      }
+      const headers: Record<string, string> = {};
+      if (proxyKey) headers["x-api-key"] = proxyKey;
       upstream = await fetch(fullUrl, { headers });
     } else {
-      // Direct fetch (fallback — likely blocked by Perigee)
+      // Direct fetch (fallback)
       upstream = await fetch(url, {
         headers: {
-          Cookie: sessionCookie,
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         },
