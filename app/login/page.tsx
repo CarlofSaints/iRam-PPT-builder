@@ -27,11 +27,15 @@ export default function LoginPage() {
   }, []);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-[#32373C]">
       <div className="text-center">
-        <div className="text-gray-400 text-sm mb-4">
-          Redirecting to iRam Hub...
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/iram-logo.png" alt="iRAM" className="w-20 h-20 mx-auto mb-4 rounded-lg" />
+        <h1 className="text-white text-lg font-bold mb-1">iRAM PPT Builder</h1>
+        <div className="text-white/50 text-sm mb-6">
+          Redirecting to iRAM Hub...
         </div>
+        <div className="w-8 h-8 mx-auto border-3 border-[#7CC042] border-t-transparent rounded-full animate-spin mb-6" />
         <a
           href="#"
           onClick={(e) => {

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { PptTemplate } from "@/lib/types";
 
 export default function ControlCentrePage() {
+  const router = useRouter();
   const [templates, setTemplates] = useState<PptTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -45,9 +47,11 @@ export default function ControlCentrePage() {
         }),
       });
       if (res.ok) {
+        const created: PptTemplate = await res.json();
         setNewName("");
         setShowNew(false);
-        await loadTemplates();
+        // Redirect to edit page so user can configure mapping, PPTX template, etc.
+        router.push(`/control-centre/${created.id}`);
       }
     } catch {
       // ignore
@@ -64,15 +68,15 @@ export default function ControlCentrePage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-gray-800">Control Centre</h2>
-        <p className="text-sm text-gray-500 mt-1">
+        <h2 className="text-xl font-bold text-[#32373C]">Control Centre</h2>
+        <p className="text-sm text-[#828282] mt-1">
           Manage PPT templates.
         </p>
       </div>
 
       {/* ── Templates ──────────────────────────────────── */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700">PPT Templates</h3>
+        <h3 className="text-sm font-semibold text-[#32373C]">PPT Templates</h3>
         <button
           onClick={() => setShowNew(!showNew)}
           className="px-4 py-2 bg-[#7CC042] text-white text-sm font-semibold rounded-md hover:bg-[#5a9a2e] transition-colors"
@@ -197,7 +201,7 @@ export default function ControlCentrePage() {
                   />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-800">
+                  <p className="text-sm font-medium text-[#32373C]">
                     {t.name}
                     {t.id === "default" && (
                       <span className="ml-2 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
@@ -205,10 +209,23 @@ export default function ControlCentrePage() {
                       </span>
                     )}
                   </p>
-                  <p className="text-xs text-gray-400">
-                    {t.fontFamily} &middot;{" "}
-                    {t.logoUrl ? "Logo uploaded" : "No logo"}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                    <span className="text-xs text-[#828282]">
+                      {t.fontFamily}
+                    </span>
+                    <span className="text-[#828282]">&middot;</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${t.logoUrl ? "bg-[#e8f5d9] text-[#5a9a2e]" : "bg-gray-100 text-gray-400"}`}>
+                      {t.logoUrl ? "Logo" : "No logo"}
+                    </span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${t.columnMapping ? "bg-[#e8f5d9] text-[#5a9a2e]" : "bg-gray-100 text-gray-400"}`}>
+                      {t.columnMapping ? "Mapped" : "Auto-detect"}
+                    </span>
+                    {t.pptxTemplateUrl && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#e8f5d9] text-[#5a9a2e]">
+                        PPTX
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">

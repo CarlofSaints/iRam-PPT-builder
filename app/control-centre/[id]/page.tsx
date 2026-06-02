@@ -321,7 +321,7 @@ export default function EditTemplatePage({
         >
           &larr; Back
         </button>
-        <h2 className="text-xl font-bold text-gray-800">
+        <h2 className="text-xl font-bold text-[#32373C]">
           Edit Template: {template.name}
         </h2>
       </div>

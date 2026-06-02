@@ -57,15 +57,15 @@ export default function UploadZone({ onFile, disabled }: Props) {
         className="hidden"
         disabled={disabled}
       />
-      <div className="text-4xl mb-3 text-gray-400">
+      <div className={`text-4xl mb-3 ${dragging ? "text-[#7CC042]" : "text-[#828282]"}`}>
         {dragging ? "\u2B07" : "\u{1F4C4}"}
       </div>
-      <p className="text-sm font-medium text-gray-700">
+      <p className="text-sm font-medium text-[#32373C]">
         {dragging
           ? "Drop your Excel file here"
-          : "Drag & drop your Perigee Excel export here"}
+          : "Drag & drop your Excel export here"}
       </p>
-      <p className="text-xs text-gray-400 mt-1">
+      <p className="text-xs text-[#828282] mt-1">
         or click to browse (.xlsx, .xls)
       </p>
     </div>

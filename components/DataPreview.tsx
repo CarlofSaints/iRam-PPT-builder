@@ -21,7 +21,7 @@ export default function DataPreview({ data }: Props) {
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-5">
-      <h3 className="text-sm font-semibold text-gray-800 mb-3 uppercase tracking-wide">
+      <h3 className="text-sm font-semibold text-[#32373C] mb-3 uppercase tracking-wide">
         Data Preview
       </h3>
 

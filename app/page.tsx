@@ -129,8 +129,8 @@ export default function HomePage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-gray-800">Generate PPT</h2>
-        <p className="text-sm text-gray-500 mt-1">
+        <h2 className="text-xl font-bold text-[#32373C]">Generate PPT</h2>
+        <p className="text-sm text-[#828282] mt-1">
           Select a template, then upload an Excel file to generate a PowerPoint report.
         </p>
       </div>

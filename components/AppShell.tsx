@@ -23,8 +23,12 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gray-400 text-sm">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-[#32373C]">
+        <div className="text-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/iram-logo.png" alt="iRAM" className="w-16 h-16 mx-auto mb-4 rounded-lg" />
+          <div className="text-[#7CC042] text-sm font-medium">Loading...</div>
+        </div>
       </div>
     );
   }
