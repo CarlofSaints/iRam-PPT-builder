@@ -24,6 +24,9 @@ export async function PUT(req: Request, { params }: Ctx) {
       accentColor: body.accentColor,
       fontFamily: body.fontFamily,
       logoUrl: body.logoUrl,
+      columnMapping: body.columnMapping,
+      pptxTemplateUrl: body.pptxTemplateUrl,
+      outputNaming: body.outputNaming,
     });
 
     if (!updated) {

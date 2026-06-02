@@ -39,7 +39,8 @@ export async function getTemplate(
 
 /** Create a new template. Returns the created template. */
 export async function createTemplate(
-  data: Pick<PptTemplate, "name" | "primaryColor" | "accentColor" | "fontFamily">
+  data: Pick<PptTemplate, "name" | "primaryColor" | "accentColor" | "fontFamily"> &
+    Partial<Pick<PptTemplate, "columnMapping" | "pptxTemplateUrl" | "outputNaming">>
 ): Promise<PptTemplate> {
   const all = await loadTemplates();
   const template: PptTemplate = {
@@ -49,6 +50,9 @@ export async function createTemplate(
     accentColor: data.accentColor || "32373C",
     logoUrl: null,
     fontFamily: data.fontFamily || "Arial",
+    columnMapping: data.columnMapping ?? null,
+    pptxTemplateUrl: data.pptxTemplateUrl ?? null,
+    outputNaming: data.outputNaming ?? "{title}_Report",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -60,7 +64,7 @@ export async function createTemplate(
 /** Update an existing template. Returns the updated template or null. */
 export async function updateTemplate(
   id: string,
-  data: Partial<Pick<PptTemplate, "name" | "primaryColor" | "accentColor" | "fontFamily" | "logoUrl">>
+  data: Partial<Pick<PptTemplate, "name" | "primaryColor" | "accentColor" | "fontFamily" | "logoUrl" | "columnMapping" | "pptxTemplateUrl" | "outputNaming">>
 ): Promise<PptTemplate | null> {
   const all = await loadTemplates();
   const idx = all.findIndex((t) => t.id === id);

@@ -98,12 +98,19 @@ export async function POST(req: Request) {
     // Build the PPTX
     const pptxBuffer = await buildPptx(data, template, imageMap);
 
-    // Build filename
-    const safeName = data.title
-      .replace(/[^a-zA-Z0-9\s-]/g, "")
+    // Build filename from template's outputNaming pattern (or default)
+    const pattern = template.outputNaming || "{title}_Report";
+    const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const firstChannel = data.rows[0]?.channel || "";
+    const resolvedName = pattern
+      .replace(/\{title\}/gi, data.title)
+      .replace(/\{date\}/gi, dateStr)
+      .replace(/\{channel\}/gi, firstChannel);
+    const safeName = resolvedName
+      .replace(/[^a-zA-Z0-9\s_-]/g, "")
       .replace(/\s+/g, "_")
-      .substring(0, 60);
-    const filename = `${safeName}_Report.pptx`;
+      .substring(0, 80);
+    const filename = `${safeName || "Report"}.pptx`;
 
     return new NextResponse(pptxBuffer as unknown as BodyInit, {
       headers: {

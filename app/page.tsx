@@ -26,7 +26,7 @@ export default function HomePage() {
       .catch(() => {});
   }, []);
 
-  // Handle file upload → parse
+  // Handle file upload → parse (uses selected template's column mapping)
   const handleFile = useCallback(async (file: File) => {
     setStage("parsing");
     setError("");
@@ -36,6 +36,9 @@ export default function HomePage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      if (selectedTemplate) {
+        formData.append("templateId", selectedTemplate);
+      }
 
       const res = await fetch("/api/parse", { method: "POST", body: formData });
       const json = await res.json();
@@ -55,7 +58,7 @@ export default function HomePage() {
       }
       setStage("error");
     }
-  }, []);
+  }, [selectedTemplate]);
 
   // Handle generate — server downloads images and builds PPTX
   const handleGenerate = useCallback(async () => {
@@ -128,8 +131,38 @@ export default function HomePage() {
       <div>
         <h2 className="text-xl font-bold text-gray-800">Generate PPT</h2>
         <p className="text-sm text-gray-500 mt-1">
-          Upload a Perigee Excel export to generate a PowerPoint report.
+          Select a template, then upload an Excel file to generate a PowerPoint report.
         </p>
+      </div>
+
+      {/* Template selector — above upload so column mapping applies during parse */}
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">
+          Template
+        </label>
+        <select
+          value={selectedTemplate}
+          onChange={(e) => {
+            setSelectedTemplate(e.target.value);
+            // Clear parsed data when template changes (mapping may differ)
+            if (parsedData) {
+              setParsedData(null);
+              setFileName("");
+              setStage("idle");
+            }
+          }}
+          disabled={isGenerating}
+          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#7CC042]"
+        >
+          {templates.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+          {templates.length === 0 && (
+            <option value="default">iRAM Standard</option>
+          )}
+        </select>
       </div>
 
       {/* Upload zone */}
@@ -156,29 +189,9 @@ export default function HomePage() {
       {/* Data preview */}
       {parsedData && <DataPreview data={parsedData} />}
 
-      {/* Template selector + generate button */}
+      {/* Generate button */}
       {parsedData && stage !== "done" && (
-        <div className="flex items-end gap-4">
-          <div className="flex-1">
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Template
-            </label>
-            <select
-              value={selectedTemplate}
-              onChange={(e) => setSelectedTemplate(e.target.value)}
-              disabled={isGenerating}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#7CC042]"
-            >
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-              {templates.length === 0 && (
-                <option value="default">iRAM Standard</option>
-              )}
-            </select>
-          </div>
+        <div>
           <button
             onClick={handleGenerate}
             disabled={isGenerating}

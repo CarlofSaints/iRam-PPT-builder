@@ -35,6 +35,22 @@ export interface ParsedData {
   summary: StatusSummary;
 }
 
+/** Maps internal field keys to actual Excel column header text */
+export interface ColumnMapping {
+  title?: string;
+  notes?: string;
+  channel?: string;
+  store?: string;
+  storeCode?: string;
+  storeFullName?: string;
+  createdBy?: string;
+  replyStatus?: string;
+  replyBy?: string;
+  replyNotes?: string;
+  replyResponse?: string;
+  imageColumns?: string[];    // 1-10 column names containing image URLs
+}
+
 /** A configurable PPT template stored in Vercel Blob */
 export interface PptTemplate {
   id: string;
@@ -43,6 +59,9 @@ export interface PptTemplate {
   accentColor: string;        // Hex without # e.g. "E04E2A"
   logoUrl: string | null;     // Blob URL for uploaded logo
   fontFamily: string;         // Default "Arial"
+  columnMapping?: ColumnMapping | null;  // Custom Excel column mapping
+  pptxTemplateUrl?: string | null;       // Blob URL of uploaded .pptx master
+  outputNaming?: string;                 // Pattern: "{title}_Report" (default)
   createdAt: string;
   updatedAt: string;
 }

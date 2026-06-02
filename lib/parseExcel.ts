@@ -1,9 +1,10 @@
 import * as XLSX from "xlsx";
-import type { TaskRow, ParsedData, StatusSummary } from "./types";
+import type { TaskRow, ParsedData, StatusSummary, ColumnMapping } from "./types";
 
 /**
  * Column mappings — maps canonical field names to possible Excel header variants.
  * Case-insensitive matching. First match wins.
+ * Used only when no explicit ColumnMapping is provided.
  */
 const COLUMN_MAP: Record<string, string[]> = {
   title:          ["title", "task title"],
@@ -30,10 +31,10 @@ function norm(s: string): string {
 }
 
 /**
- * Parse an uploaded Excel buffer into structured ParsedData.
- * Auto-detects header row (first row where >= 3 known columns match).
+ * Detect the raw data grid from a workbook buffer.
+ * Returns { raw, wb } for use by both parseExcel and extractHeaders.
  */
-export function parseExcel(buffer: Buffer): ParsedData {
+function readSheet(buffer: Buffer): { raw: string[][]; wb: XLSX.WorkBook } {
   const wb = XLSX.read(buffer, { type: "buffer" });
   const sheetName = wb.SheetNames[0];
   if (!sheetName) throw new Error("No sheets found in workbook");
@@ -44,13 +45,24 @@ export function parseExcel(buffer: Buffer): ParsedData {
     defval: "",
     blankrows: false,
   });
+  return { raw, wb };
+}
 
-  if (raw.length < 2) throw new Error("File has fewer than 2 rows");
+/**
+ * Extract headers from an Excel buffer.
+ * Returns the detected header row and its index.
+ * Used by the sample-excel endpoint.
+ */
+export function extractHeaders(buffer: Buffer): {
+  headers: string[];
+  headerRow: number;
+} {
+  const { raw } = readSheet(buffer);
+  if (raw.length < 1) throw new Error("File is empty");
 
-  // Find header row — scan first 10 rows for the one with most matched columns
+  const allFieldNames = Object.values(COLUMN_MAP).flat();
   let headerRowIdx = 0;
   let bestMatchCount = 0;
-  const allFieldNames = Object.values(COLUMN_MAP).flat();
 
   for (let r = 0; r < Math.min(10, raw.length); r++) {
     const row = raw[r];
@@ -65,22 +77,147 @@ export function parseExcel(buffer: Buffer): ParsedData {
     }
   }
 
-  if (bestMatchCount < 3) {
-    throw new Error(
-      `Could not detect header row — only ${bestMatchCount} known columns found. Expected columns like: Title, Store, Reply Status, Image 1, etc.`
-    );
-  }
+  // If auto-detect found nothing, just use row 0
+  if (bestMatchCount === 0) headerRowIdx = 0;
 
-  // Build column index map: field key → column index
-  const headerRow = raw[headerRowIdx];
+  const headers = raw[headerRowIdx]
+    .map((c) => String(c).trim())
+    .filter((h) => h !== "");
+
+  return { headers, headerRow: headerRowIdx };
+}
+
+/**
+ * Build colMap from an explicit ColumnMapping (non-image fields).
+ * Matches mapping values to header row by normalised comparison.
+ */
+function buildColMapFromMapping(
+  mapping: ColumnMapping,
+  headerRow: string[]
+): Record<string, number> {
   const colMap: Record<string, number> = {};
+  const fields: (keyof Omit<ColumnMapping, "imageColumns">)[] = [
+    "title", "notes", "channel", "store", "storeCode",
+    "storeFullName", "createdBy", "replyStatus", "replyBy",
+    "replyNotes", "replyResponse",
+  ];
 
-  for (const [fieldKey, aliases] of Object.entries(COLUMN_MAP)) {
+  for (const field of fields) {
+    const mappedHeader = mapping[field];
+    if (!mappedHeader) continue;
+    const normalised = norm(mappedHeader);
     for (let c = 0; c < headerRow.length; c++) {
-      const n = norm(String(headerRow[c]));
-      if (aliases.includes(n)) {
-        colMap[fieldKey] = c;
+      if (norm(String(headerRow[c])) === normalised) {
+        colMap[field] = c;
         break;
+      }
+    }
+  }
+  return colMap;
+}
+
+/**
+ * Build image column indices from an explicit ColumnMapping.
+ */
+function buildImageColIndices(
+  mapping: ColumnMapping,
+  headerRow: string[]
+): number[] {
+  if (!mapping.imageColumns?.length) return [];
+  const indices: number[] = [];
+  for (const colName of mapping.imageColumns) {
+    const normalised = norm(colName);
+    for (let c = 0; c < headerRow.length; c++) {
+      if (norm(String(headerRow[c])) === normalised) {
+        indices.push(c);
+        break;
+      }
+    }
+  }
+  return indices;
+}
+
+/**
+ * Parse an uploaded Excel buffer into structured ParsedData.
+ * If a ColumnMapping is provided, use explicit column names instead of auto-detect aliases.
+ * If no mapping, auto-detects header row (first row where >= 3 known columns match).
+ */
+export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): ParsedData {
+  const { raw } = readSheet(buffer);
+
+  if (raw.length < 2) throw new Error("File has fewer than 2 rows");
+
+  let headerRowIdx: number;
+  let colMap: Record<string, number>;
+  let imageColIndices: number[] | null = null; // null = use image1-5 keys
+
+  if (mapping && Object.keys(mapping).some((k) => k !== "imageColumns" ? mapping[k as keyof ColumnMapping] : (mapping.imageColumns?.length ?? 0) > 0)) {
+    // ── Explicit mapping mode ──
+    // Collect all mapped header names to find the header row
+    const mappedNames: string[] = [];
+    const fields: (keyof Omit<ColumnMapping, "imageColumns">)[] = [
+      "title", "notes", "channel", "store", "storeCode",
+      "storeFullName", "createdBy", "replyStatus", "replyBy",
+      "replyNotes", "replyResponse",
+    ];
+    for (const f of fields) {
+      if (mapping[f]) mappedNames.push(norm(mapping[f]!));
+    }
+    if (mapping.imageColumns) {
+      for (const ic of mapping.imageColumns) mappedNames.push(norm(ic));
+    }
+
+    // Find header row by matching mapped names
+    headerRowIdx = 0;
+    let bestMatch = 0;
+    for (let r = 0; r < Math.min(10, raw.length); r++) {
+      let matchCount = 0;
+      for (const cell of raw[r]) {
+        if (mappedNames.includes(norm(String(cell)))) matchCount++;
+      }
+      if (matchCount > bestMatch) {
+        bestMatch = matchCount;
+        headerRowIdx = r;
+      }
+    }
+
+    colMap = buildColMapFromMapping(mapping, raw[headerRowIdx]);
+    imageColIndices = buildImageColIndices(mapping, raw[headerRowIdx]);
+  } else {
+    // ── Auto-detect mode (original behaviour) ──
+    headerRowIdx = 0;
+    let bestMatchCount = 0;
+    const allFieldNames = Object.values(COLUMN_MAP).flat();
+
+    for (let r = 0; r < Math.min(10, raw.length); r++) {
+      const row = raw[r];
+      let matchCount = 0;
+      for (const cell of row) {
+        const n = norm(String(cell));
+        if (allFieldNames.some((f) => n === f)) matchCount++;
+      }
+      if (matchCount > bestMatchCount) {
+        bestMatchCount = matchCount;
+        headerRowIdx = r;
+      }
+    }
+
+    if (bestMatchCount < 3) {
+      throw new Error(
+        `Could not detect header row — only ${bestMatchCount} known columns found. Expected columns like: Title, Store, Reply Status, Image 1, etc.`
+      );
+    }
+
+    // Build column index map from aliases
+    const headerRow = raw[headerRowIdx];
+    colMap = {};
+    for (const [fieldKey, aliases] of Object.entries(COLUMN_MAP)) {
+      for (let c = 0; c < headerRow.length; c++) {
+        const n = norm(String(headerRow[c]));
+        if (aliases.includes(n)) {
+          colMap[fieldKey] = c;
+          break;
+        }
       }
     }
   }
@@ -102,12 +239,23 @@ export function parseExcel(buffer: Buffer): ParsedData {
     const title = val("title");
     if (title && !firstTitle) firstTitle = title;
 
-    // Collect images (non-empty URLs)
+    // Collect images
     const images: string[] = [];
-    for (let i = 1; i <= 5; i++) {
-      const url = val(`image${i}`);
-      if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
-        images.push(url);
+    if (imageColIndices) {
+      // Explicit image columns from mapping
+      for (const ci of imageColIndices) {
+        const url = String(row[ci] ?? "").trim();
+        if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+          images.push(url);
+        }
+      }
+    } else {
+      // Auto-detect: image1-image5 keys
+      for (let i = 1; i <= 5; i++) {
+        const url = val(`image${i}`);
+        if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+          images.push(url);
+        }
       }
     }
 

@@ -1,4 +1,6 @@
 import PptxGenJS from "pptxgenjs";
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
 import type { ParsedData, PptTemplate, TaskRow, ImageData } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -27,6 +29,65 @@ function statusColor(status: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Fallback logo: read iram-logo.png from public/ if available        */
+/* ------------------------------------------------------------------ */
+let _fallbackLogoBase64: string | null | undefined; // undefined = not loaded yet
+
+function getFallbackLogo(): string | null {
+  if (_fallbackLogoBase64 !== undefined) return _fallbackLogoBase64;
+  try {
+    const logoPath = join(process.cwd(), "public", "iram-logo.png");
+    if (existsSync(logoPath)) {
+      const buf = readFileSync(logoPath);
+      _fallbackLogoBase64 = buf.toString("base64");
+    } else {
+      _fallbackLogoBase64 = null;
+    }
+  } catch {
+    _fallbackLogoBase64 = null;
+  }
+  return _fallbackLogoBase64;
+}
+
+/* ------------------------------------------------------------------ */
+/*  .pptx template: extract background image via JSZip                 */
+/* ------------------------------------------------------------------ */
+async function extractPptxBackground(
+  pptxUrl: string
+): Promise<string | null> {
+  try {
+    const JSZip = (await import("jszip")).default;
+    const res = await fetch(pptxUrl, { cache: "no-store" });
+    if (!res.ok) return null;
+
+    const buf = await res.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+
+    // Look for slide master background image (common locations)
+    const imgPaths = [
+      "ppt/media/image1.png",
+      "ppt/media/image1.jpeg",
+      "ppt/media/image1.jpg",
+      "ppt/media/image2.png",
+      "ppt/media/image2.jpeg",
+      "ppt/media/image2.jpg",
+    ];
+
+    for (const path of imgPaths) {
+      const file = zip.file(path);
+      if (file) {
+        const data = await file.async("base64");
+        const ext = path.endsWith(".png") ? "png" : "jpeg";
+        return `image/${ext};base64,${data}`;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public: build a PPTX from parsed data + template + images          */
 /* ------------------------------------------------------------------ */
 export async function buildPptx(
@@ -43,24 +104,36 @@ export async function buildPptx(
   const accent  = hex(template.accentColor);
   const font    = template.fontFamily || "Arial";
 
+  // Extract background from uploaded .pptx template (if any)
+  let bgImage: string | null = null;
+  if (template.pptxTemplateUrl) {
+    bgImage = await extractPptxBackground(template.pptxTemplateUrl);
+  }
+
+  // Resolve logo: template logo → fallback iRAM logo → null
+  const logoData = template.logoUrl || (() => {
+    const fb = getFallbackLogo();
+    return fb ? `image/png;base64,${fb}` : null;
+  })();
+
   // ── Slide 1: Title ──────────────────────────────────────────────
-  addTitleSlide(pptx, data, template, primary, accent, font);
+  addTitleSlide(pptx, data, template, logoData, primary, accent, font, bgImage);
 
   // ── Slide 2: Task Info ──────────────────────────────────────────
-  addTaskInfoSlide(pptx, data, primary, accent, font);
+  addTaskInfoSlide(pptx, data, primary, accent, font, bgImage);
 
   // ── Slide 3: Summary ───────────────────────────────────────────
-  addSummarySlide(pptx, data, primary, accent, font);
+  addSummarySlide(pptx, data, primary, accent, font, bgImage);
 
   // ── Slides 4+: Store slides (completed rows with images) ───────
   for (const row of data.rows) {
     if (row.replyStatus.toLowerCase().trim() !== "completed") continue;
     if (row.images.length === 0) continue;
-    addStoreSlide(pptx, row, imageMap, primary, accent, font);
+    addStoreSlide(pptx, row, imageMap, primary, accent, font, bgImage);
   }
 
   // ── Last Slide: Closing ─────────────────────────────────────────
-  addClosingSlide(pptx, template, primary, font);
+  addClosingSlide(pptx, template, logoData, primary, font, bgImage);
 
   // Generate buffer
   const output = await pptx.write({ outputType: "nodebuffer" });
@@ -75,12 +148,18 @@ function addTitleSlide(
   pptx: PptxGenJS,
   data: ParsedData,
   template: PptTemplate,
+  logoData: string | null,
   primary: string,
   accent: string,
-  font: string
+  font: string,
+  bgImage: string | null
 ) {
   const slide = pptx.addSlide();
-  slide.background = { color: primary };
+  if (bgImage) {
+    slide.background = { data: bgImage };
+  } else {
+    slide.background = { color: primary };
+  }
 
   // Accent bar at bottom
   slide.addShape("rect", {
@@ -91,16 +170,21 @@ function addTitleSlide(
     fill: { color: accent },
   });
 
-  // Logo (top-right) if available
-  if (template.logoUrl) {
-    slide.addImage({
-      path: template.logoUrl,
+  // Logo (top-right) — template logo, fallback logo, or none
+  if (logoData) {
+    const imgOpts: Record<string, unknown> = {
       x: SLIDE_W - 2.2,
       y: 0.3,
       w: 1.8,
       h: 0.9,
       sizing: { type: "contain", w: 1.8, h: 0.9 },
-    });
+    };
+    if (logoData.startsWith("image/")) {
+      imgOpts.data = logoData;
+    } else {
+      imgOpts.path = logoData;
+    }
+    slide.addImage(imgOpts);
   }
 
   // Title text
@@ -148,9 +232,11 @@ function addTaskInfoSlide(
   data: ParsedData,
   primary: string,
   accent: string,
-  font: string
+  font: string,
+  bgImage: string | null
 ) {
   const slide = pptx.addSlide();
+  if (bgImage) slide.background = { data: bgImage };
 
   // Header bar
   slide.addShape("rect", {
@@ -233,9 +319,11 @@ function addSummarySlide(
   data: ParsedData,
   primary: string,
   accent: string,
-  font: string
+  font: string,
+  bgImage: string | null
 ) {
   const slide = pptx.addSlide();
+  if (bgImage) slide.background = { data: bgImage };
 
   // Header bar
   slide.addShape("rect", {
@@ -359,9 +447,11 @@ function addStoreSlide(
   imageMap: Map<string, ImageData>,
   primary: string,
   accent: string,
-  font: string
+  font: string,
+  bgImage: string | null
 ) {
   const slide = pptx.addSlide();
+  if (bgImage) slide.background = { data: bgImage };
 
   // Header bar
   slide.addShape("rect", {
@@ -537,26 +627,37 @@ function getImageLayout(
 function addClosingSlide(
   pptx: PptxGenJS,
   template: PptTemplate,
+  logoData: string | null,
   primary: string,
-  font: string
+  font: string,
+  bgImage: string | null
 ) {
   const slide = pptx.addSlide();
-  slide.background = { color: primary };
+  if (bgImage) {
+    slide.background = { data: bgImage };
+  } else {
+    slide.background = { color: primary };
+  }
 
-  if (template.logoUrl) {
-    slide.addImage({
-      path: template.logoUrl,
+  if (logoData) {
+    const imgOpts: Record<string, unknown> = {
       x: (SLIDE_W - 3) / 2,
       y: 1.2,
       w: 3,
       h: 1.5,
       sizing: { type: "contain", w: 3, h: 1.5 },
-    });
+    };
+    if (logoData.startsWith("image/")) {
+      imgOpts.data = logoData;
+    } else {
+      imgOpts.path = logoData;
+    }
+    slide.addImage(imgOpts);
   }
 
   slide.addText("Thank You", {
     x: MARGIN,
-    y: template.logoUrl ? 3.2 : 2.0,
+    y: logoData ? 3.2 : 2.0,
     w: CONTENT_W,
     h: 1,
     fontSize: 36,
