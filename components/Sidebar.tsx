@@ -2,13 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { Session } from "@/lib/useAuth";
 
 const NAV_ITEMS = [
   { href: "/", label: "Generate PPT", icon: "M" },
   { href: "/control-centre", label: "Control Centre", icon: "C" },
 ];
 
-export default function Sidebar() {
+interface Props {
+  session: Session;
+  onLogout: () => void;
+}
+
+export default function Sidebar({ session, onLogout }: Props) {
   const pathname = usePathname();
 
   return (
@@ -40,7 +46,18 @@ export default function Sidebar() {
           );
         })}
       </nav>
-      <div className="p-4 text-xs text-white/40">
+      <div className="p-4 border-t border-white/10">
+        <div className="text-xs text-white/70 mb-2 truncate">
+          {session.name} {session.surname}
+        </div>
+        <button
+          onClick={onLogout}
+          className="text-xs text-white/40 hover:text-red-400 transition-colors"
+        >
+          Sign out
+        </button>
+      </div>
+      <div className="px-4 pb-4 text-xs text-white/40">
         OuterJoin &copy; {new Date().getFullYear()}
       </div>
     </aside>
