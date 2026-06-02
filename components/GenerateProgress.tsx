@@ -3,7 +3,6 @@
 export type ProgressStage =
   | "idle"
   | "parsing"
-  | "downloading"
   | "building"
   | "done"
   | "error";
@@ -17,8 +16,7 @@ interface Props {
 
 const STAGES: { key: ProgressStage; label: string }[] = [
   { key: "parsing", label: "Parsing Excel" },
-  { key: "downloading", label: "Downloading images" },
-  { key: "building", label: "Building PPTX" },
+  { key: "building", label: "Generating report (downloading images + building PPTX)" },
   { key: "done", label: "Complete" },
 ];
 
@@ -62,12 +60,6 @@ export default function GenerateProgress({ stage, error, imageCount, downloadedC
                 }`}
               >
                 {s.label}
-                {isActive && s.key === "downloading" && imageCount
-                  ? ` (${imageCount} images)`
-                  : ""}
-                {isDone && s.key === "downloading" && downloadedCount !== undefined
-                  ? ` — ${downloadedCount}/${imageCount || 0} downloaded`
-                  : ""}
               </span>
               {/* Spinner */}
               {isActive && stage !== "done" && (
@@ -91,7 +83,13 @@ export default function GenerateProgress({ stage, error, imageCount, downloadedC
         </div>
       )}
 
-      {stage === "done" && (downloadedCount === undefined || downloadedCount > 0) && (
+      {stage === "done" && downloadedCount !== undefined && downloadedCount > 0 && (
+        <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+          PPT generated with {downloadedCount} image{downloadedCount !== 1 ? "s" : ""} and downloaded successfully.
+        </div>
+      )}
+
+      {stage === "done" && downloadedCount === undefined && (
         <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-700">
           PPT generated and downloaded successfully.
         </div>

@@ -57,98 +57,21 @@ export default function HomePage() {
     }
   }, []);
 
-  // Convert a blob to base64 string (without the data: prefix)
-  const blobToBase64 = useCallback((blob: Blob): Promise<string | null> => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const dataUrl = reader.result as string;
-        const base64 = dataUrl.split(",")[1];
-        resolve(base64 || null);
-      };
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  }, []);
-
-  // Download a single image via our server proxy (which routes through
-  // Cloudflare Worker if IMAGE_PROXY_URL is configured, or direct otherwise)
-  const downloadImage = useCallback(
-    async (url: string): Promise<{ url: string; data: string } | null> => {
-      try {
-        const proxyUrl = `/api/image?url=${encodeURIComponent(url)}`;
-        const res = await fetch(proxyUrl);
-        if (res.ok) {
-          const blob = await res.blob();
-          const base64 = await blobToBase64(blob);
-          if (base64) {
-            return { url, data: base64 };
-          }
-        } else {
-          const errText = await res.text().catch(() => "");
-          console.warn(`[ppt] Proxy failed (${res.status}): ${url.substring(0, 80)} — ${errText.substring(0, 200)}`);
-        }
-      } catch (e) {
-        console.warn(`[ppt] Proxy error: ${url.substring(0, 80)}`, e);
-      }
-      return null;
-    },
-    [blobToBase64]
-  );
-
-  // Handle generate — downloads images client-side first, then sends to server
+  // Handle generate — server downloads images and builds PPTX
   const handleGenerate = useCallback(async () => {
     if (!parsedData) return;
 
-    setStage("downloading");
+    setStage("building");
     setError("");
     setDownloadedCount(0);
 
     try {
-      // Collect all unique image URLs from completed rows
-      const allUrls: string[] = [];
-      for (const row of parsedData.rows) {
-        if (row.replyStatus.toLowerCase().trim() !== "completed") continue;
-        for (const url of row.images) {
-          if (url && !allUrls.includes(url)) allUrls.push(url);
-        }
-      }
-
-      // Download images client-side in batches of 5
-      console.log(`[ppt] Downloading ${allUrls.length} images via proxy...`);
-      console.log(`[ppt] First URL: ${allUrls[0]?.substring(0, 100)}`);
-      const imageMap: Record<string, string> = {};
-      let downloaded = 0;
-      let failedStatuses: string[] = [];
-      for (let i = 0; i < allUrls.length; i += 5) {
-        const batch = allUrls.slice(i, i + 5);
-        const results = await Promise.all(
-          batch.map((url) => downloadImage(url))
-        );
-        for (const result of results) {
-          if (result) {
-            imageMap[result.url] = result.data;
-            downloaded++;
-          }
-        }
-        console.log(`[ppt] Batch done: ${downloaded}/${allUrls.length} downloaded so far`);
-      }
-      console.log(`[ppt] Final: ${downloaded}/${allUrls.length} images downloaded`);
-      if (failedStatuses.length > 0) {
-        console.warn(`[ppt] Failed statuses: ${[...new Set(failedStatuses)].join(", ")}`)
-      }
-      setDownloadedCount(downloaded);
-
-      setStage("building");
-
-      // Send parsed data + pre-downloaded images to server
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           data: parsedData,
           templateId: selectedTemplate,
-          images: imageMap,
         }),
       });
 
@@ -161,6 +84,13 @@ export default function HomePage() {
           errMsg = text;
         }
         throw new Error(errMsg || "Generation failed");
+      }
+
+      // Read image download count from response header
+      const imgHeader = res.headers.get("X-Images-Downloaded");
+      if (imgHeader) {
+        const count = parseInt(imgHeader.split("/")[0], 10);
+        if (!isNaN(count)) setDownloadedCount(count);
       }
 
       // Download the PPTX
@@ -182,7 +112,7 @@ export default function HomePage() {
       setError(err instanceof Error ? err.message : "Generation failed");
       setStage("error");
     }
-  }, [parsedData, selectedTemplate, downloadImage]);
+  }, [parsedData, selectedTemplate]);
 
   // Count images for progress display
   const imageCount = parsedData
@@ -191,8 +121,7 @@ export default function HomePage() {
         .reduce((sum, r) => sum + r.images.length, 0)
     : 0;
 
-  const isGenerating =
-    stage === "downloading" || stage === "building" || stage === "parsing";
+  const isGenerating = stage === "building" || stage === "parsing";
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
