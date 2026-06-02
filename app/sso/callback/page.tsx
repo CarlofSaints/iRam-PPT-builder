@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function SSOCallbackPage() {
+function SSOCallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState("");
@@ -74,5 +74,19 @@ export default function SSOCallbackPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="text-gray-400 text-sm">Signing in...</div>
     </div>
+  );
+}
+
+export default function SSOCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="text-gray-400 text-sm">Signing in...</div>
+        </div>
+      }
+    >
+      <SSOCallbackInner />
+    </Suspense>
   );
 }
