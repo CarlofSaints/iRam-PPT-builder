@@ -125,11 +125,31 @@ export async function buildPptx(
   // ── Slide 3: Summary ───────────────────────────────────────────
   addSummarySlide(pptx, data, primary, accent, font, bgImage);
 
-  // ── Slides 4+: Store slides (completed rows with images) ───────
+  // ── Slides 4+: Store slides (rows with images) ─────────────────
+  // Skip a row only when it has an explicit status that isn't "completed"
+  // (task-report exports). Form/relay exports have no status column, so every
+  // row with images gets a slide. When a store has more than IMAGES_PER_SLIDE
+  // photos, we emit additional "continued" slides so no image is dropped.
+  const IMAGES_PER_SLIDE = 5;
   for (const row of data.rows) {
-    if (row.replyStatus.toLowerCase().trim() !== "completed") continue;
+    const status = row.replyStatus.toLowerCase().trim();
+    if (status && status !== "completed") continue;
     if (row.images.length === 0) continue;
-    addStoreSlide(pptx, row, imageMap, primary, accent, font, bgImage);
+
+    // Resolve the images we actually downloaded, preserving order.
+    const imgs: ImageData[] = [];
+    for (const url of row.images) {
+      const img = imageMap.get(url);
+      if (img) imgs.push(img);
+    }
+    if (imgs.length === 0) continue;
+
+    const pageCount = Math.ceil(imgs.length / IMAGES_PER_SLIDE);
+    for (let p = 0; p < pageCount; p++) {
+      const chunk = imgs.slice(p * IMAGES_PER_SLIDE, p * IMAGES_PER_SLIDE + IMAGES_PER_SLIDE);
+      const pageInfo = pageCount > 1 ? { page: p + 1, total: pageCount } : null;
+      addStoreSlide(pptx, row, chunk, primary, accent, font, bgImage, pageInfo);
+    }
   }
 
   // ── Last Slide: Closing ─────────────────────────────────────────
@@ -444,11 +464,12 @@ function addSummarySlide(
 function addStoreSlide(
   pptx: PptxGenJS,
   row: TaskRow,
-  imageMap: Map<string, ImageData>,
+  imgs: ImageData[],
   primary: string,
   accent: string,
   font: string,
-  bgImage: string | null
+  bgImage: string | null,
+  pageInfo: { page: number; total: number } | null = null
 ) {
   const slide = pptx.addSlide();
   if (bgImage) slide.background = { data: bgImage };
@@ -462,10 +483,13 @@ function addStoreSlide(
     fill: { color: primary },
   });
 
-  // Store name + code
-  const storeLine = row.storeCode
+  // Store name + code (+ page indicator when photos span multiple slides)
+  const baseLine = row.storeCode
     ? `${row.storeCode} — ${row.store}`
     : row.store;
+  const storeLine = pageInfo
+    ? `${baseLine}  (${pageInfo.page}/${pageInfo.total})`
+    : baseLine;
   slide.addText(storeLine, {
     x: MARGIN,
     y: 0.08,
@@ -534,13 +558,6 @@ function addStoreSlide(
       valign: "top",
       wrap: true,
     });
-  }
-
-  // Images — collect available ones
-  const imgs: ImageData[] = [];
-  for (const url of row.images) {
-    const img = imageMap.get(url);
-    if (img) imgs.push(img);
   }
 
   if (imgs.length === 0) return;

@@ -220,6 +220,32 @@ export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): Pars
         }
       }
     }
+
+    // Auto-detect image columns. Perigee form/relay exports store photos in
+    // columns like "Before Photos", "After Photos" and "Pictures of
+    // merchandising" (often duplicated), not just "Image 1-5". A column counts
+    // as an image column if EITHER its header mentions a photo/picture/image
+    // keyword OR its data cells contain http(s) URLs — Perigee images are
+    // always URLs, so URL detection catches oddly-named columns too. We scan by
+    // column index so duplicate header names are all captured.
+    const colCount = Math.max(...raw.map((r) => r.length), headerRow.length);
+    const sampleEnd = Math.min(raw.length, headerRowIdx + 1 + 50); // sample up to 50 data rows
+    const imgCols = new Set<number>();
+    for (let c = 0; c < colCount; c++) {
+      const n = norm(String(headerRow[c] ?? ""));
+      if (n.includes("photo") || n.includes("picture") || n.includes("image")) {
+        imgCols.add(c);
+        continue;
+      }
+      for (let r = headerRowIdx + 1; r < sampleEnd; r++) {
+        const cell = String(raw[r]?.[c] ?? "").trim();
+        if (cell.startsWith("http://") || cell.startsWith("https://")) {
+          imgCols.add(c);
+          break;
+        }
+      }
+    }
+    imageColIndices = [...imgCols].sort((a, b) => a - b);
   }
 
   // Parse data rows
