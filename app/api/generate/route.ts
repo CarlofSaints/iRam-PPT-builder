@@ -64,10 +64,16 @@ export async function POST(req: Request) {
       return Response.json({ error: "Template not found" }, { status: 404 });
     }
 
-    // Collect all unique image URLs from completed rows
+    // Collect all unique image URLs.
+    // Skip a row only when it has an EXPLICIT status that isn't "completed"
+    // (task-report exports). Form/relay exports have no status column, so their
+    // rows have an empty status and must still contribute their images — this
+    // must mirror the store-slide filter in lib/pptBuilder.ts, otherwise we
+    // download nothing and the deck comes out empty.
     const allUrls: string[] = [];
     for (const row of data.rows) {
-      if (row.replyStatus.toLowerCase().trim() !== "completed") continue;
+      const status = row.replyStatus.toLowerCase().trim();
+      if (status && status !== "completed") continue;
       for (const url of row.images) {
         if (url && !allUrls.includes(url)) allUrls.push(url);
       }
