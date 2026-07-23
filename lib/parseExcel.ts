@@ -1,5 +1,15 @@
 import * as XLSX from "xlsx";
-import type { TaskRow, ParsedData, StatusSummary, ColumnMapping } from "./types";
+import { groupVisits } from "./visits";
+import type {
+  TaskRow,
+  ParsedData,
+  StatusSummary,
+  ColumnMapping,
+  QAPair,
+  QuestionStat,
+  DeckSummary,
+  ExportMode,
+} from "./types";
 
 /**
  * Column mappings — maps canonical field names to possible Excel header variants.
@@ -18,6 +28,8 @@ const COLUMN_MAP: Record<string, string[]> = {
   replyBy:        ["reply by", "replied by", "completed by"],
   replyNotes:     ["reply notes", "reply comment", "reply comments"],
   replyResponse:  ["reply response", "response"],
+  visitId:        ["id", "visit id", "task id", "visit uuid"],
+  date:           ["date", "visit date", "date of visit", "created date", "reply date"],
   image1:         ["image 1", "image1", "photo 1", "photo1"],
   image2:         ["image 2", "image2", "photo 2", "photo2"],
   image3:         ["image 3", "image3", "photo 3", "photo3"],
@@ -25,9 +37,58 @@ const COLUMN_MAP: Record<string, string[]> = {
   image5:         ["image 5", "image5", "photo 5", "photo5"],
 };
 
+/** Non-image, non-question metadata columns present in every Perigee export. */
+const META_HEADERS = new Set([
+  "id", "email", "first name", "last name", "customer", "channel", "store",
+  "store code", "store name", "store id", "site code", "outlet", "outlet code",
+  "store full name", "full name", "full store name", "province", "region",
+  "date", "visit date", "date of visit", "created date", "reply date", "time",
+  "visit uuid", "visit id", "task id", "tag", "sync date", "sync time", "day",
+  "title", "task title", "notes", "task notes", "description", "created by",
+  "creator", "assigned by", "status", "task status", "reply status",
+  "reply by", "replied by", "completed by", "reply notes", "reply comment",
+  "reply comments", "reply response", "response", "user", "rep", "latitude",
+  "longitude",
+]);
+
+/** Values that always mean a column is a choice question, however few rows. */
+const BOOLEAN_VALUES = new Set([
+  "yes", "no", "y", "n", "true", "false", "n/a", "na", "not applicable",
+]);
+
 /** Normalise a header cell value for matching */
 function norm(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Format a Perigee date cell (serial number, Date, or string) as "23 Jul 2026". */
+function formatDate(raw: unknown): string {
+  if (raw === null || raw === undefined || raw === "") return "";
+
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  if (raw instanceof Date) return isNaN(raw.getTime()) ? "" : fmt(raw);
+
+  // Excel serial number — Perigee exports dates unformatted, so XLSX hands
+  // them back as raw numbers rather than Dates.
+  const asNumber = typeof raw === "number" ? raw : Number(String(raw).trim());
+  if (!isNaN(asNumber) && asNumber > 20000 && asNumber < 80000) {
+    const parts = XLSX.SSF.parse_date_code(asNumber);
+    if (parts) return fmt(new Date(parts.y, parts.m - 1, parts.d));
+  }
+
+  const str = String(raw).trim();
+  // Perigee also emits DD/MM/YYYY — parse day-first, never as US MM/DD/YYYY.
+  const dmy = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dmy) {
+    const d = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
+    if (!isNaN(d.getTime())) return fmt(d);
+  }
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) return fmt(parsed);
+
+  return str;
 }
 
 /**
@@ -87,6 +148,13 @@ export function extractHeaders(buffer: Buffer): {
   return { headers, headerRow: headerRowIdx };
 }
 
+/** Every ColumnMapping key except imageColumns. */
+const MAPPABLE_FIELDS: (keyof Omit<ColumnMapping, "imageColumns">)[] = [
+  "title", "notes", "channel", "store", "storeCode",
+  "storeFullName", "createdBy", "replyStatus", "replyBy",
+  "replyNotes", "replyResponse", "visitId", "date",
+];
+
 /**
  * Build colMap from an explicit ColumnMapping (non-image fields).
  * Matches mapping values to header row by normalised comparison.
@@ -96,13 +164,8 @@ function buildColMapFromMapping(
   headerRow: string[]
 ): Record<string, number> {
   const colMap: Record<string, number> = {};
-  const fields: (keyof Omit<ColumnMapping, "imageColumns">)[] = [
-    "title", "notes", "channel", "store", "storeCode",
-    "storeFullName", "createdBy", "replyStatus", "replyBy",
-    "replyNotes", "replyResponse",
-  ];
 
-  for (const field of fields) {
+  for (const field of MAPPABLE_FIELDS) {
     const mappedHeader = mapping[field];
     if (!mappedHeader) continue;
     const normalised = norm(mappedHeader);
@@ -137,6 +200,72 @@ function buildImageColIndices(
   return indices;
 }
 
+/** True when a value reads as a number (barcode, quantity, rand value). */
+function isNumericish(v: string): boolean {
+  return /^-?[\d\s.,]+$/.test(v) && /\d/.test(v);
+}
+
+/**
+ * Classify one question column and count its responses.
+ *
+ * A column is a "choice" question when its answers repeat across a small set of
+ * short values — Yes/No toggles and dropdown pickers. Free text (every answer
+ * different) and numeric columns (barcodes, quantities, rand values) are
+ * counted as answered but produce no breakdown.
+ */
+function analyseQuestion(question: string, values: string[]): QuestionStat {
+  const answered = values.length;
+  if (answered === 0) {
+    return { question, kind: "text", answered: 0, options: [] };
+  }
+
+  const numericShare = values.filter(isNumericish).length / answered;
+  if (numericShare > 0.8) {
+    return { question, kind: "numeric", answered, options: [] };
+  }
+
+  // Group case-insensitively, but display the most common original spelling.
+  const groups = new Map<string, Map<string, number>>();
+  for (const v of values) {
+    const key = v.toLowerCase();
+    const spellings = groups.get(key) ?? new Map<string, number>();
+    spellings.set(v, (spellings.get(v) ?? 0) + 1);
+    groups.set(key, spellings);
+  }
+
+  const distinct = groups.size;
+  const maxLen = values.reduce((m, v) => Math.max(m, v.length), 0);
+  const allBoolean = [...groups.keys()].every((k) => BOOLEAN_VALUES.has(k));
+
+  // Repetition is what separates a dropdown from free text: a choice column has
+  // few distinct values relative to how many times it was answered.
+  const isChoice =
+    allBoolean ||
+    (answered >= 5 && distinct <= 20 && distinct * 3 <= answered && maxLen <= 60);
+
+  if (!isChoice) {
+    return { question, kind: "text", answered, options: [] };
+  }
+
+  const options = [...groups.entries()]
+    .map(([, spellings]) => {
+      let label = "";
+      let best = 0;
+      let count = 0;
+      for (const [spelling, n] of spellings) {
+        count += n;
+        if (n > best) {
+          best = n;
+          label = spelling;
+        }
+      }
+      return { label, count };
+    })
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  return { question, kind: "choice", answered, options };
+}
+
 /**
  * Parse an uploaded Excel buffer into structured ParsedData.
  * If a ColumnMapping is provided, use explicit column names instead of auto-detect aliases.
@@ -155,12 +284,7 @@ export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): Pars
     // ── Explicit mapping mode ──
     // Collect all mapped header names to find the header row
     const mappedNames: string[] = [];
-    const fields: (keyof Omit<ColumnMapping, "imageColumns">)[] = [
-      "title", "notes", "channel", "store", "storeCode",
-      "storeFullName", "createdBy", "replyStatus", "replyBy",
-      "replyNotes", "replyResponse",
-    ];
-    for (const f of fields) {
+    for (const f of MAPPABLE_FIELDS) {
       if (mapping[f]) mappedNames.push(norm(mapping[f]!));
     }
     if (mapping.imageColumns) {
@@ -248,9 +372,35 @@ export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): Pars
     imageColIndices = [...imgCols].sort((a, b) => a - b);
   }
 
+  const headerRow = raw[headerRowIdx] ?? [];
+
+  // ── Question columns ────────────────────────────────────────────
+  // Anything that is neither a mapped metadata field, nor an image column, nor
+  // standard Perigee visit metadata is a form question.
+  const usedIndices = new Set<number>(Object.values(colMap));
+  for (const ci of imageColIndices ?? []) usedIndices.add(ci);
+  if (imageColIndices === null) {
+    for (let i = 1; i <= 5; i++) {
+      const idx = colMap[`image${i}`];
+      if (idx !== undefined) usedIndices.add(idx);
+    }
+  }
+
+  const colCount = Math.max(...raw.map((r) => r.length), headerRow.length);
+  const questionCols: { index: number; question: string }[] = [];
+  for (let c = 0; c < colCount; c++) {
+    if (usedIndices.has(c)) continue;
+    const label = String(headerRow[c] ?? "").trim();
+    if (!label) continue;
+    if (META_HEADERS.has(norm(label))) continue;
+    questionCols.push({ index: c, question: label });
+  }
+
   // Parse data rows
   const rows: TaskRow[] = [];
   let firstTitle = "";
+  const answersByQuestion = new Map<string, string[]>();
+  for (const q of questionCols) answersByQuestion.set(q.question, []);
 
   for (let r = headerRowIdx + 1; r < raw.length; r++) {
     const row = raw[r];
@@ -285,6 +435,17 @@ export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): Pars
       }
     }
 
+    // Collect form answers
+    const answers: QAPair[] = [];
+    for (const q of questionCols) {
+      const answer = String(row[q.index] ?? "").trim();
+      if (!answer) continue;
+      answers.push({ question: q.question, answer });
+      answersByQuestion.get(q.question)!.push(answer);
+    }
+
+    const dateIdx = colMap["date"];
+
     rows.push({
       title,
       notes: val("notes"),
@@ -297,11 +458,14 @@ export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): Pars
       replyBy: val("replyBy"),
       replyNotes: val("replyNotes"),
       replyResponse: val("replyResponse"),
+      visitId: val("visitId"),
+      date: dateIdx !== undefined ? formatDate(row[dateIdx]) : "",
+      answers,
       images,
     });
   }
 
-  // Calculate summary
+  // Calculate status summary
   const summary: StatusSummary = {
     total: rows.length,
     completed: 0,
@@ -321,9 +485,33 @@ export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): Pars
     else summary.blank++; // Unknown statuses go to blank
   }
 
+  // Question analysis
+  const questionStats: QuestionStat[] = questionCols.map((q) =>
+    analyseQuestion(q.question, answersByQuestion.get(q.question)!)
+  );
+
+  // Task exports carry a status column; form/relay exports do not.
+  const mode: ExportMode =
+    colMap["replyStatus"] !== undefined || rows.some((r) => r.replyStatus !== "")
+      ? "task"
+      : "form";
+
+  const visits = groupVisits(rows, questionStats);
+  const deckSummary: DeckSummary = {
+    uniqueSites: new Set(rows.map((r) => r.store).filter(Boolean)).size,
+    totalVisits: visits.length,
+    totalPictures: rows.reduce((sum, r) => sum + r.images.length, 0),
+    uniqueQuestions: questionCols.length,
+    totalAnswers: questionStats.reduce((sum, q) => sum + q.answered, 0),
+  };
+
   return {
     title: firstTitle || "Untitled Report",
+    mode,
     rows,
     summary,
+    deckSummary,
+    questionStats,
   };
 }
+

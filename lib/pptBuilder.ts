@@ -1,7 +1,15 @@
 import PptxGenJS from "pptxgenjs";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import type { ParsedData, PptTemplate, TaskRow, ImageData } from "./types";
+import { groupVisits, IMAGES_PER_SLIDE } from "./visits";
+import type {
+  ParsedData,
+  PptTemplate,
+  ImageData,
+  StoreVisit,
+  QuestionStat,
+  DeckSummary,
+} from "./types";
 
 /* ------------------------------------------------------------------ */
 /*  Dimensions — inches (pptxgenjs default unit)                      */
@@ -11,6 +19,9 @@ const SLIDE_H = 5.625; // 16:9
 
 const MARGIN = 0.4;
 const CONTENT_W = SLIDE_W - MARGIN * 2;
+
+/** Emoji need a font that actually has the glyphs. */
+const EMOJI_FONT = "Segoe UI Emoji";
 
 /* ------------------------------------------------------------------ */
 /*  Colour helpers                                                     */
@@ -87,6 +98,18 @@ async function extractPptxBackground(
   }
 }
 
+/** Older cached parses may predate these fields — never trust them to exist. */
+function safeDeckSummary(data: ParsedData): DeckSummary {
+  if (data.deckSummary) return data.deckSummary;
+  return {
+    uniqueSites: new Set(data.rows.map((r) => r.store).filter(Boolean)).size,
+    totalVisits: 0,
+    totalPictures: data.rows.reduce((s, r) => s + (r.images?.length ?? 0), 0),
+    uniqueQuestions: 0,
+    totalAnswers: 0,
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Public: build a PPTX from parsed data + template + images          */
 /* ------------------------------------------------------------------ */
@@ -116,31 +139,48 @@ export async function buildPptx(
     return fb ? `image/png;base64,${fb}` : null;
   })();
 
+  const questionStats = data.questionStats ?? [];
+  const deckSummary = safeDeckSummary(data);
+  const isTask = data.mode !== "form";
+
   // ── Slide 1: Title ──────────────────────────────────────────────
   addTitleSlide(pptx, data, template, logoData, primary, accent, font, bgImage);
 
-  // ── Slide 2: Task Info ──────────────────────────────────────────
-  addTaskInfoSlide(pptx, data, primary, accent, font, bgImage);
+  // ── Slide 2: Overview cards ─────────────────────────────────────
+  addOverviewSlide(pptx, data, deckSummary, primary, accent, font, bgImage);
 
-  // ── Slide 3: Summary ───────────────────────────────────────────
-  addSummarySlide(pptx, data, primary, accent, font, bgImage);
+  // ── Task Info (only useful when the export carries task notes) ──
+  if (data.rows[0]?.notes) {
+    addTaskInfoSlide(pptx, data, primary, accent, font, bgImage);
+  }
 
-  // ── Slides 4+: Store slides (rows with images) ─────────────────
-  // Skip a row only when it has an explicit status that isn't "completed"
-  // (task-report exports). Form/relay exports have no status column, so every
-  // row with images gets a slide. When a store has more than IMAGES_PER_SLIDE
-  // photos, we emit additional "continued" slides so no image is dropped.
-  const IMAGES_PER_SLIDE = 5;
-  for (const row of data.rows) {
-    const status = row.replyStatus.toLowerCase().trim();
+  // ── Status summary — task exports only. Form exports have no reply
+  //    status, so this slide used to report every row as "Blank". ──
+  if (isTask) {
+    addSummarySlide(pptx, data, primary, accent, font, bgImage);
+  }
+
+  // ── Response breakdown for choice questions (Yes/No, dropdowns) ──
+  addQuestionSlides(pptx, questionStats, primary, accent, font, bgImage);
+
+  // ── Store slides ────────────────────────────────────────────────
+  // One slide per store *visit*, not per row. Form/relay exports emit one row
+  // per answer set, so a single visit arrives as many rows — building a slide
+  // each produced long runs of slides with an identical header. Photos for a
+  // visit are paged IMAGES_PER_SLIDE at a time so none are dropped.
+  const visits = groupVisits(data.rows, questionStats);
+
+  for (const visit of visits) {
+    // Skip a visit only when it has an explicit status that isn't "completed"
+    // (task-report exports). Form/relay exports have no status column.
+    const status = visit.replyStatus.toLowerCase().trim();
     if (status && status !== "completed") continue;
-    if (row.images.length === 0) continue;
 
     // Resolve the images we actually downloaded, preserving order.
-    const imgs: ImageData[] = [];
-    for (const url of row.images) {
+    const imgs: { img: ImageData; caption: string }[] = [];
+    for (const { url, caption } of visit.images) {
       const img = imageMap.get(url);
-      if (img) imgs.push(img);
+      if (img) imgs.push({ img, caption });
     }
     if (imgs.length === 0) continue;
 
@@ -148,7 +188,7 @@ export async function buildPptx(
     for (let p = 0; p < pageCount; p++) {
       const chunk = imgs.slice(p * IMAGES_PER_SLIDE, p * IMAGES_PER_SLIDE + IMAGES_PER_SLIDE);
       const pageInfo = pageCount > 1 ? { page: p + 1, total: pageCount } : null;
-      addStoreSlide(pptx, row, chunk, primary, accent, font, bgImage, pageInfo);
+      addStoreSlide(pptx, visit, chunk, primary, accent, font, bgImage, pageInfo);
     }
   }
 
@@ -220,7 +260,7 @@ function addTitleSlide(
   });
 
   // Subtitle
-  slide.addText("Task Report", {
+  slide.addText(data.mode === "form" ? "Form Report" : "Task Report", {
     x: MARGIN,
     y: 2.6,
     w: CONTENT_W,
@@ -230,12 +270,16 @@ function addTitleSlide(
     color: accent,
   });
 
-  // Date
-  const dateStr = new Date().toLocaleDateString("en-ZA", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  // Reporting period from the data, falling back to the generation date
+  const dates = data.rows.map((r) => r.date).filter(Boolean);
+  const period = dateRangeLabel(dates);
+  const dateStr =
+    period ||
+    new Date().toLocaleDateString("en-ZA", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
   slide.addText(dateStr, {
     x: MARGIN,
     y: 3.2,
@@ -244,6 +288,101 @@ function addTitleSlide(
     fontSize: 12,
     fontFace: font,
     color: "CCCCCC",
+  });
+}
+
+/** "05 Jun 2026 – 23 Jul 2026", or a single date, or "" when there are none. */
+function dateRangeLabel(dates: string[]): string {
+  if (dates.length === 0) return "";
+  const parsed = dates
+    .map((d) => ({ label: d, time: Date.parse(d) }))
+    .filter((d) => !isNaN(d.time))
+    .sort((a, b) => a.time - b.time);
+  if (parsed.length === 0) return "";
+  const from = parsed[0].label;
+  const to = parsed[parsed.length - 1].label;
+  return from === to ? from : `${from} – ${to}`;
+}
+
+/**
+ * Slide 2 — headline counts as icon cards.
+ * Task exports have no form questions, so the last two cards fall back to task
+ * counts rather than showing two zeroes.
+ */
+function addOverviewSlide(
+  pptx: PptxGenJS,
+  data: ParsedData,
+  s: DeckSummary,
+  primary: string,
+  accent: string,
+  font: string,
+  bgImage: string | null
+) {
+  const slide = pptx.addSlide();
+  if (bgImage) slide.background = { data: bgImage };
+
+  slide.addShape("rect", { x: 0, y: 0, w: SLIDE_W, h: 0.7, fill: { color: primary } });
+  slide.addText("Overview", {
+    x: MARGIN, y: 0.1, w: CONTENT_W, h: 0.5,
+    fontSize: 22, fontFace: font, color: "FFFFFF", bold: true,
+  });
+  slide.addShape("rect", { x: 0, y: 0.7, w: SLIDE_W, h: 0.04, fill: { color: accent } });
+
+  const cards: { icon: string; value: number; label: string }[] = [
+    { icon: "🏪", value: s.uniqueSites,    label: "Unique Sites" },
+    { icon: "📍", value: s.totalVisits,    label: "Total Visits" },
+    { icon: "📷", value: s.totalPictures,  label: "Pictures Loaded" },
+  ];
+
+  if (s.uniqueQuestions > 0) {
+    cards.push(
+      { icon: "❓", value: s.uniqueQuestions, label: "Unique Questions" },
+      { icon: "✅", value: s.totalAnswers,    label: "Questions Answered" }
+    );
+  } else {
+    cards.push(
+      { icon: "📋", value: data.summary.total,     label: "Total Tasks" },
+      { icon: "✅", value: data.summary.completed, label: "Completed" }
+    );
+  }
+
+  const cardW = 1.72;
+  const cardH = 2.15;
+  const gap = 0.15;
+  const totalW = cards.length * cardW + (cards.length - 1) * gap;
+  const startX = (SLIDE_W - totalW) / 2;
+  const startY = 1.55;
+
+  cards.forEach((card, i) => {
+    const x = startX + i * (cardW + gap);
+
+    slide.addShape("roundRect", {
+      x, y: startY, w: cardW, h: cardH,
+      fill: { color: primary },
+      rectRadius: 0.1,
+    });
+
+    // Icon chip
+    slide.addShape("ellipse", {
+      x: x + (cardW - 0.62) / 2, y: startY + 0.18, w: 0.62, h: 0.62,
+      fill: { color: "FFFFFF" },
+    });
+    slide.addText(card.icon, {
+      x: x + (cardW - 0.62) / 2, y: startY + 0.18, w: 0.62, h: 0.62,
+      fontSize: 20, fontFace: EMOJI_FONT, align: "center", valign: "middle",
+    });
+
+    slide.addText(String(card.value), {
+      x, y: startY + 0.92, w: cardW, h: 0.65,
+      fontSize: 30, fontFace: font, color: "FFFFFF", bold: true,
+      align: "center", valign: "middle",
+    });
+
+    slide.addText(card.label, {
+      x: x + 0.08, y: startY + 1.55, w: cardW - 0.16, h: 0.5,
+      fontSize: 9, fontFace: font, color: "FFFFFF",
+      align: "center", valign: "top", wrap: true,
+    });
   });
 }
 
@@ -353,7 +492,7 @@ function addSummarySlide(
     h: 0.7,
     fill: { color: primary },
   });
-  slide.addText("Summary", {
+  slide.addText("Task Status", {
     x: MARGIN,
     y: 0.1,
     w: CONTENT_W,
@@ -461,10 +600,143 @@ function addSummarySlide(
   });
 }
 
+/* ------------------------------------------------------------------ */
+/*  Response breakdown                                                 */
+/* ------------------------------------------------------------------ */
+
+const Q_BODY_TOP = 0.95;
+const Q_BOTTOM = SLIDE_H - 0.25;
+const Q_COL_W = (CONTENT_W - 0.4) / 2;
+const Q_ROW_H = 0.26;
+const Q_MAX_OPTIONS = 8;
+
+/** Height a question block needs, including its options. */
+function questionBlockHeight(q: QuestionStat): number {
+  const titleLines = Math.min(2, Math.ceil(q.question.length / 46) || 1);
+  const shown = Math.min(q.options.length, Q_MAX_OPTIONS);
+  const overflow = q.options.length > Q_MAX_OPTIONS ? Q_ROW_H : 0;
+  return titleLines * 0.22 + 0.1 + shown * Q_ROW_H + overflow;
+}
+
+/**
+ * One or more slides counting the responses to every choice question —
+ * Yes/No answers and dropdown selections. Free-text and numeric columns are
+ * deliberately skipped: counting unique sentences or barcodes tells you nothing.
+ */
+function addQuestionSlides(
+  pptx: PptxGenJS,
+  questionStats: QuestionStat[],
+  primary: string,
+  accent: string,
+  font: string,
+  bgImage: string | null
+) {
+  const choices = questionStats.filter(
+    (q) => q.kind === "choice" && q.options.length > 0
+  );
+  if (choices.length === 0) return;
+
+  const newSlide = () => {
+    const slide = pptx.addSlide();
+    if (bgImage) slide.background = { data: bgImage };
+    slide.addShape("rect", { x: 0, y: 0, w: SLIDE_W, h: 0.7, fill: { color: primary } });
+    slide.addText("Response Breakdown", {
+      x: MARGIN, y: 0.1, w: CONTENT_W, h: 0.5,
+      fontSize: 22, fontFace: font, color: "FFFFFF", bold: true,
+    });
+    slide.addShape("rect", { x: 0, y: 0.7, w: SLIDE_W, h: 0.04, fill: { color: accent } });
+    return slide;
+  };
+
+  let slide = newSlide();
+  let col = 0;
+  let y = Q_BODY_TOP;
+
+  for (const q of choices) {
+    const h = questionBlockHeight(q);
+
+    if (y + h > Q_BOTTOM && y > Q_BODY_TOP) {
+      col++;
+      y = Q_BODY_TOP;
+      if (col > 1) {
+        slide = newSlide();
+        col = 0;
+      }
+    }
+
+    const x = MARGIN + col * (Q_COL_W + 0.4);
+    renderQuestionBlock(slide, q, x, y, primary, accent, font);
+    y += h + 0.24;
+  }
+}
+
+function renderQuestionBlock(
+  slide: ReturnType<PptxGenJS["addSlide"]>,
+  q: QuestionStat,
+  x: number,
+  y: number,
+  primary: string,
+  accent: string,
+  font: string
+) {
+  const titleLines = Math.min(2, Math.ceil(q.question.length / 46) || 1);
+  const titleH = titleLines * 0.22;
+
+  slide.addText(`${q.question}  (${q.answered})`, {
+    x, y, w: Q_COL_W, h: titleH,
+    fontSize: 10, fontFace: font, color: primary, bold: true,
+    valign: "top", wrap: true,
+  });
+
+  const labelW = Q_COL_W * 0.44;
+  const barX = x + labelW + 0.06;
+  const barMaxW = Q_COL_W * 0.38;
+  const countX = barX + barMaxW + 0.06;
+  const maxCount = Math.max(...q.options.map((o) => o.count), 1);
+
+  let rowY = y + titleH + 0.1;
+  const shown = q.options.slice(0, Q_MAX_OPTIONS);
+
+  for (const opt of shown) {
+    slide.addText(opt.label, {
+      x, y: rowY, w: labelW, h: Q_ROW_H,
+      fontSize: 9, fontFace: font, color: "555555", valign: "middle",
+    });
+
+    slide.addShape("roundRect", {
+      x: barX, y: rowY + 0.07, w: barMaxW, h: 0.12,
+      fill: { color: "E8E8E8" }, rectRadius: 0.04,
+    });
+    slide.addShape("roundRect", {
+      x: barX, y: rowY + 0.07,
+      w: Math.max(0.06, barMaxW * (opt.count / maxCount)), h: 0.12,
+      fill: { color: accent }, rectRadius: 0.04,
+    });
+
+    slide.addText(String(opt.count), {
+      x: countX, y: rowY, w: Q_COL_W - (countX - x), h: Q_ROW_H,
+      fontSize: 9, fontFace: font, color: "333333", bold: true, valign: "middle",
+    });
+
+    rowY += Q_ROW_H;
+  }
+
+  if (q.options.length > Q_MAX_OPTIONS) {
+    slide.addText(`+ ${q.options.length - Q_MAX_OPTIONS} more`, {
+      x, y: rowY, w: Q_COL_W, h: Q_ROW_H,
+      fontSize: 8, fontFace: font, color: "999999", italic: true, valign: "middle",
+    });
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Store visit slides                                                 */
+/* ------------------------------------------------------------------ */
+
 function addStoreSlide(
   pptx: PptxGenJS,
-  row: TaskRow,
-  imgs: ImageData[],
+  visit: StoreVisit,
+  imgs: { img: ImageData; caption: string }[],
   primary: string,
   accent: string,
   font: string,
@@ -484,44 +756,71 @@ function addStoreSlide(
   });
 
   // Store name + code (+ page indicator when photos span multiple slides)
-  const baseLine = row.storeCode
-    ? `${row.storeCode} — ${row.store}`
-    : row.store;
+  const baseLine = visit.storeCode
+    ? `${visit.storeCode} — ${visit.store}`
+    : visit.store;
   const storeLine = pageInfo
     ? `${baseLine}  (${pageInfo.page}/${pageInfo.total})`
     : baseLine;
+
+  const hasStatus = visit.replyStatus.trim() !== "";
+  const statusW = 1.5;
+  const dateW = 1.9;
+  const rightEdge = SLIDE_W - MARGIN;
+  const statusX = rightEdge - statusW;
+  const dateX = hasStatus ? statusX - 0.15 - dateW : rightEdge - dateW;
+  const titleW = (visit.date ? dateX : hasStatus ? statusX : rightEdge) - MARGIN - 0.15;
+
   slide.addText(storeLine, {
     x: MARGIN,
     y: 0.08,
-    w: CONTENT_W - 2,
+    w: Math.max(2, titleW),
     h: 0.5,
     fontSize: 18,
     fontFace: font,
     color: "FFFFFF",
     bold: true,
+    valign: "middle",
   });
 
-  // Status badge
-  const sc = statusColor(row.replyStatus);
-  slide.addShape("roundRect", {
-    x: SLIDE_W - MARGIN - 1.6,
-    y: 0.12,
-    w: 1.5,
-    h: 0.4,
-    fill: { color: sc },
-    rectRadius: 0.06,
-  });
-  slide.addText(row.replyStatus, {
-    x: SLIDE_W - MARGIN - 1.6,
-    y: 0.12,
-    w: 1.5,
-    h: 0.4,
-    fontSize: 10,
-    fontFace: font,
-    color: "FFFFFF",
-    bold: true,
-    align: "center",
-  });
+  // Visit date
+  if (visit.date) {
+    slide.addText(visit.date, {
+      x: dateX,
+      y: 0.08,
+      w: dateW,
+      h: 0.5,
+      fontSize: 11,
+      fontFace: font,
+      color: "FFFFFF",
+      align: "right",
+      valign: "middle",
+    });
+  }
+
+  // Status badge — task exports only; form exports have no status
+  if (hasStatus) {
+    const sc = statusColor(visit.replyStatus);
+    slide.addShape("roundRect", {
+      x: statusX,
+      y: 0.12,
+      w: statusW,
+      h: 0.4,
+      fill: { color: sc },
+      rectRadius: 0.06,
+    });
+    slide.addText(visit.replyStatus, {
+      x: statusX,
+      y: 0.12,
+      w: statusW,
+      h: 0.4,
+      fontSize: 10,
+      fontFace: font,
+      color: "FFFFFF",
+      bold: true,
+      align: "center",
+    });
+  }
 
   // Accent underline
   slide.addShape("rect", {
@@ -532,10 +831,12 @@ function addStoreSlide(
     fill: { color: accent },
   });
 
-  // Rep name + reply notes (left info panel)
+  // Rep name + reply notes (left info panel). Form exports carry neither, so
+  // the photos take the full slide width instead of leaving a blank column.
+  const hasPanel = Boolean(visit.replyBy || visit.replyNotes);
   let infoY = 0.8;
-  if (row.replyBy) {
-    slide.addText(`Rep: ${row.replyBy}`, {
+  if (visit.replyBy) {
+    slide.addText(`Rep: ${visit.replyBy}`, {
       x: MARGIN,
       y: infoY,
       w: 3,
@@ -546,8 +847,8 @@ function addStoreSlide(
     });
     infoY += 0.3;
   }
-  if (row.replyNotes) {
-    slide.addText(row.replyNotes, {
+  if (visit.replyNotes) {
+    slide.addText(visit.replyNotes, {
       x: MARGIN,
       y: infoY,
       w: 3,
@@ -563,23 +864,40 @@ function addStoreSlide(
   if (imgs.length === 0) return;
 
   // Image layout area
-  const imgStartX = 3.6;
+  const imgStartX = hasPanel ? 3.6 : MARGIN;
   const imgStartY = 0.8;
   const imgAreaW = SLIDE_W - imgStartX - MARGIN;
   const imgAreaH = SLIDE_H - imgStartY - 0.2;
 
   const layouts = getImageLayout(imgs.length, imgStartX, imgStartY, imgAreaW, imgAreaH);
+  const captionH = imgs.some((i) => i.caption) ? 0.2 : 0;
 
   for (let i = 0; i < layouts.length && i < imgs.length; i++) {
     const { x, y, w, h } = layouts[i];
+    const picH = h - captionH;
+
     slide.addImage({
-      data: `image/jpeg;base64,${imgs[i].data}`,
+      data: `image/jpeg;base64,${imgs[i].img.data}`,
       x,
       y,
       w,
-      h,
-      sizing: { type: "contain", w, h },
+      h: picH,
+      sizing: { type: "contain", w, h: picH },
     });
+
+    if (captionH && imgs[i].caption) {
+      slide.addText(imgs[i].caption, {
+        x,
+        y: y + picH,
+        w,
+        h: captionH,
+        fontSize: 7,
+        fontFace: font,
+        color: "666666",
+        align: "center",
+        valign: "middle",
+      });
+    }
   }
 }
 
@@ -627,17 +945,18 @@ function getImageLayout(
     ];
   }
 
-  // 5 images: large left + 2x2 grid right
-  const leftW = areaW * 0.5;
+  // 5 images: one large on the left, a 2x2 grid on the right.
+  const leftW = areaW * 0.46;
   const rightW = areaW - leftW - gap;
-  const halfH = (areaH - gap) / 2;
+  const cellW = (rightW - gap) / 2;
+  const cellH = (areaH - gap) / 2;
+  const rightX = startX + leftW + gap;
   return [
-    { x: startX, y: startY, w: leftW, h: areaH },
-    { x: startX + leftW + gap, y: startY, w: rightW, h: halfH },
-    { x: startX + leftW + gap, y: startY + halfH + gap, w: rightW, h: halfH },
-    // If we somehow have fewer spots than images, just stack remaining
-    { x: startX, y: startY, w: leftW * 0.48, h: areaH * 0.48 },
-    { x: startX + leftW * 0.52, y: startY, w: leftW * 0.48, h: areaH * 0.48 },
+    { x: rightX - leftW - gap, y: startY, w: leftW, h: areaH },
+    { x: rightX, y: startY, w: cellW, h: cellH },
+    { x: rightX + cellW + gap, y: startY, w: cellW, h: cellH },
+    { x: rightX, y: startY + cellH + gap, w: cellW, h: cellH },
+    { x: rightX + cellW + gap, y: startY + cellH + gap, w: cellW, h: cellH },
   ];
 }
 

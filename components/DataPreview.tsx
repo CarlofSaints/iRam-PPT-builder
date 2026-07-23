@@ -1,6 +1,7 @@
 "use client";
 
 import type { ParsedData } from "@/lib/types";
+import { groupVisits, countStoreSlides, IMAGES_PER_SLIDE } from "@/lib/visits";
 
 interface Props {
   data: ParsedData;
@@ -8,16 +9,17 @@ interface Props {
 
 export default function DataPreview({ data }: Props) {
   const { summary, rows } = data;
+  const isForm = data.mode === "form";
+  const questionStats = data.questionStats ?? [];
 
   // Unique stores
   const stores = [...new Set(rows.map((r) => r.store).filter(Boolean))];
   // Total images
   const totalImages = rows.reduce((sum, r) => sum + r.images.length, 0);
-  // Completed with images
-  const completedWithImages = rows.filter(
-    (r) =>
-      r.replyStatus.toLowerCase().trim() === "completed" && r.images.length > 0
-  ).length;
+  // Slides are built per store visit, not per row
+  const visits = groupVisits(rows, questionStats);
+  const storeSlides = countStoreSlides(visits, IMAGES_PER_SLIDE);
+  const choiceQuestions = questionStats.filter((q) => q.kind === "choice");
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-5">
@@ -26,39 +28,100 @@ export default function DataPreview({ data }: Props) {
       </h3>
 
       {/* Title */}
-      <div className="mb-4">
-        <span className="text-xs text-gray-500">Task Title:</span>
-        <p className="text-sm font-medium text-[#32373C]">{data.title}</p>
+      <div className="mb-4 flex items-center gap-2">
+        <div>
+          <span className="text-xs text-gray-500">
+            {isForm ? "Report:" : "Task Title:"}
+          </span>
+          <p className="text-sm font-medium text-[#32373C]">{data.title}</p>
+        </div>
+        <span className="ml-auto text-[10px] uppercase tracking-wide px-2 py-1 rounded bg-gray-100 text-gray-600">
+          {isForm ? "Form export" : "Task export"}
+        </span>
       </div>
 
-      {/* Summary boxes */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-4">
-        <SummaryBox label="Total" count={summary.total} color="bg-[#32373C]" />
-        <SummaryBox label="Completed" count={summary.completed} color="bg-green-600" />
-        <SummaryBox label="Not Done" count={summary.notCompleted} color="bg-red-600" />
-        <SummaryBox label="Pending" count={summary.pending} color="bg-amber-500" />
-        <SummaryBox label="Expired" count={summary.expired} color="bg-purple-600" />
-        <SummaryBox label="Blank" count={summary.blank} color="bg-gray-400" />
+      {/* Overview boxes — these are the slide-2 cards */}
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-4">
+        <SummaryBox label="Unique Sites" count={stores.length} color="bg-[#7CC042]" />
+        <SummaryBox label="Total Visits" count={visits.length} color="bg-[#7CC042]" />
+        <SummaryBox label="Pictures" count={totalImages} color="bg-[#7CC042]" />
+        <SummaryBox
+          label="Questions"
+          count={data.deckSummary?.uniqueQuestions ?? 0}
+          color="bg-[#32373C]"
+        />
+        <SummaryBox
+          label="Answered"
+          count={data.deckSummary?.totalAnswers ?? 0}
+          color="bg-[#32373C]"
+        />
       </div>
+
+      {/* Task status boxes — only meaningful for task exports */}
+      {!isForm && (
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-4">
+          <SummaryBox label="Total" count={summary.total} color="bg-[#32373C]" />
+          <SummaryBox label="Completed" count={summary.completed} color="bg-green-600" />
+          <SummaryBox label="Not Done" count={summary.notCompleted} color="bg-red-600" />
+          <SummaryBox label="Pending" count={summary.pending} color="bg-amber-500" />
+          <SummaryBox label="Expired" count={summary.expired} color="bg-purple-600" />
+          <SummaryBox label="Blank" count={summary.blank} color="bg-gray-400" />
+        </div>
+      )}
 
       {/* Stats row */}
       <div className="flex flex-wrap gap-4 text-xs text-gray-600">
         <span>
-          <strong>{stores.length}</strong> stores
+          <strong>{rows.length}</strong> rows → <strong>{visits.length}</strong> visits
         </span>
         <span>
           <strong>{totalImages}</strong> images found
         </span>
         <span>
-          <strong>{completedWithImages}</strong> store slides will be generated
+          <strong>{storeSlides}</strong> store slides will be generated
         </span>
       </div>
+
+      {/* Response breakdown preview */}
+      {choiceQuestions.length > 0 && (
+        <details className="mt-3">
+          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+            Response breakdown ({choiceQuestions.length} counted{" "}
+            {choiceQuestions.length === 1 ? "question" : "questions"})
+          </summary>
+          <div className="mt-2 max-h-56 overflow-y-auto space-y-2">
+            {choiceQuestions.map((q) => (
+              <div key={q.question} className="text-xs">
+                <div className="font-medium text-[#32373C]">
+                  {q.question}{" "}
+                  <span className="font-normal text-gray-400">({q.answered})</span>
+                </div>
+                <div className="text-gray-600 pl-2">
+                  {q.options.slice(0, 8).map((o) => (
+                    <div key={o.label} className="flex justify-between gap-2">
+                      <span className="truncate">{o.label}</span>
+                      <strong>{o.count}</strong>
+                    </div>
+                  ))}
+                  {q.options.length > 8 && (
+                    <div className="text-gray-400">
+                      + {q.options.length - 8} more
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
       {/* Image test — first 3 images from completed rows */}
       {(() => {
         const sampleImages: string[] = [];
         for (const r of rows) {
-          if (r.replyStatus.toLowerCase().trim() !== "completed") continue;
+          // Mirror the builder: only an explicit non-completed status skips a row
+          const status = r.replyStatus.toLowerCase().trim();
+          if (status && status !== "completed") continue;
           for (const img of r.images) {
             if (img && sampleImages.length < 3) sampleImages.push(img);
           }

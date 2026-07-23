@@ -12,6 +12,8 @@ const PPT_FIELDS: { key: keyof Omit<ColumnMapping, "imageColumns">; label: strin
   { key: "store", label: "Store Name" },
   { key: "storeCode", label: "Store Code" },
   { key: "storeFullName", label: "Store Full Name" },
+  { key: "date", label: "Visit Date" },
+  { key: "visitId", label: "Visit / Task ID" },
   { key: "createdBy", label: "Created By" },
   { key: "replyStatus", label: "Reply Status" },
   { key: "replyBy", label: "Reply By" },

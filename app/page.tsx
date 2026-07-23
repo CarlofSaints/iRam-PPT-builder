@@ -118,9 +118,14 @@ export default function HomePage() {
   }, [parsedData, selectedTemplate]);
 
   // Count images for progress display
+  // Mirror the builder: only an explicit non-completed status skips a row, so
+  // form exports (which have no status column) still report their images.
   const imageCount = parsedData
     ? parsedData.rows
-        .filter((r) => r.replyStatus.toLowerCase().trim() === "completed")
+        .filter((r) => {
+          const status = r.replyStatus.toLowerCase().trim();
+          return !status || status === "completed";
+        })
         .reduce((sum, r) => sum + r.images.length, 0)
     : 0;
 

@@ -1,9 +1,32 @@
 import { NextResponse } from "next/server";
+import sharp from "sharp";
 import type { ParsedData, ImageData } from "@/lib/types";
 import { getTemplate } from "@/lib/templateData";
 import { buildPptx } from "@/lib/pptBuilder";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
+
+/** How many images to fetch at once. */
+const DOWNLOAD_CONCURRENCY = 12;
+
+/**
+ * Perigee serves full-size phone photos (~1.3 MB each). Embedded untouched, a
+ * 200-photo deck lands at ~260 MB, which is slow to build, slow to download and
+ * painful to open. Downscaling to slide resolution cuts that by ~10x with no
+ * visible loss at the sizes we lay out.
+ */
+async function compressImage(buffer: ArrayBuffer): Promise<Buffer> {
+  const input = Buffer.from(buffer);
+  try {
+    return await sharp(input)
+      .rotate()                                // honour EXIF orientation
+      .resize({ width: 1400, height: 1400, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 72, mozjpeg: true })
+      .toBuffer();
+  } catch {
+    return input;                              // unreadable image — embed as-is
+  }
+}
 
 /**
  * Download a single image from Perigee via Railway proxy.
@@ -36,7 +59,8 @@ async function downloadImage(url: string): Promise<string | null> {
     }
 
     const buffer = await upstream.arrayBuffer();
-    return Buffer.from(buffer).toString("base64");
+    const compressed = await compressImage(buffer);
+    return compressed.toString("base64");
   } catch (err) {
     console.warn(`[generate] Image fetch error: ${url.substring(0, 80)}`, err);
     return null;
@@ -79,26 +103,30 @@ export async function POST(req: Request) {
       }
     }
 
-    // Download images server-side in batches of 5
+    // Download images server-side. A worker pool keeps all lanes busy for the
+    // whole run — fixed batches stalled on the slowest image in each batch,
+    // which is what pushed 199-photo exports past the function timeout.
     console.log(`[generate] Downloading ${allUrls.length} images server-side...`);
     const imageMap = new Map<string, ImageData>();
     let downloaded = 0;
+    let cursor = 0;
 
-    for (let i = 0; i < allUrls.length; i += 5) {
-      const batch = allUrls.slice(i, i + 5);
-      const results = await Promise.all(
-        batch.map(async (url) => {
-          const base64 = await downloadImage(url);
-          return base64 ? { url, base64 } : null;
-        })
-      );
-      for (const result of results) {
-        if (result) {
-          imageMap.set(result.url, { data: result.base64, type: "jpeg" });
+    const worker = async () => {
+      for (;;) {
+        const i = cursor++;
+        if (i >= allUrls.length) return;
+        const url = allUrls[i];
+        const base64 = await downloadImage(url);
+        if (base64) {
+          imageMap.set(url, { data: base64, type: "jpeg" });
           downloaded++;
         }
       }
-    }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(DOWNLOAD_CONCURRENCY, allUrls.length) }, worker)
+    );
     console.log(`[generate] Downloaded ${downloaded}/${allUrls.length} images`);
 
     // Build the PPTX
