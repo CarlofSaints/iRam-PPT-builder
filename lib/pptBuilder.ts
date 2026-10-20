@@ -40,14 +40,14 @@ function statusColor(status: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Fallback logo: read iram-logo.png from public/ if available        */
+/*  Fallback logo: white iRam logo (title/closing slides are green)   */
 /* ------------------------------------------------------------------ */
 let _fallbackLogoBase64: string | null | undefined; // undefined = not loaded yet
 
 function getFallbackLogo(): string | null {
   if (_fallbackLogoBase64 !== undefined) return _fallbackLogoBase64;
   try {
-    const logoPath = join(process.cwd(), "public", "iram-logo.png");
+    const logoPath = join(process.cwd(), "public", "iram-logo-white.png");
     if (existsSync(logoPath)) {
       const buf = readFileSync(logoPath);
       _fallbackLogoBase64 = buf.toString("base64");
