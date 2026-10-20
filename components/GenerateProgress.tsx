@@ -79,7 +79,7 @@ export default function GenerateProgress({ stage, error, imageCount, downloadedC
       {stage === "done" && downloadedCount === 0 && imageCount && imageCount > 0 && (
         <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-700">
           Warning: 0 of {imageCount} images could be downloaded. The PPT was generated without images.
-          Perigee may be blocking image access.
+          The image links may have expired or be unreachable.
         </div>
       )}
 

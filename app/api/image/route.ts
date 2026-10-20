@@ -5,14 +5,15 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/image?url=<perigee-portal-url>
  *
- * Routes through Railway proxy (IMAGE_PROXY_URL).
- * Perigee image URLs are public — no session cookie needed.
+ * Perigee URLs route through the Railway proxy (IMAGE_PROXY_URL), which only
+ * accepts Perigee. Field Goose URLs are public and fetched direct.
  */
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
 
   if (!url) return new NextResponse("Missing url param", { status: 400 });
-  if (!url.startsWith("https://live.perigeeportal.co.za")) {
+  const isPerigee = url.startsWith("https://live.perigeeportal.co.za/");
+  if (!isPerigee && !url.startsWith("https://www.fieldgoose.com/")) {
     return new NextResponse("Disallowed domain", { status: 403 });
   }
 
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
 
     let upstream: Response;
 
-    if (proxyUrl) {
+    if (proxyUrl && isPerigee) {
       // Route through Railway proxy
       const fullUrl = `${proxyUrl}/image?url=${encodeURIComponent(url)}`;
       const headers: Record<string, string> = {};
