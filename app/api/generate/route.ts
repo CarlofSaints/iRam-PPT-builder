@@ -29,7 +29,8 @@ async function compressImage(buffer: ArrayBuffer): Promise<Buffer> {
 }
 
 /**
- * Download a single image from Perigee via Railway proxy.
+ * Download a single image. Old Perigee URLs go via the Railway proxy (it only
+ * accepts live.perigeeportal.co.za); Field Goose URLs are public, fetch direct.
  * Returns base64 string or null on failure.
  */
 async function downloadImage(url: string): Promise<string | null> {
@@ -39,7 +40,7 @@ async function downloadImage(url: string): Promise<string | null> {
   try {
     let upstream: Response;
 
-    if (proxyUrl) {
+    if (proxyUrl && url.startsWith("https://live.perigeeportal.co.za")) {
       const fullUrl = `${proxyUrl}/image?url=${encodeURIComponent(url)}`;
       const headers: Record<string, string> = {};
       if (proxyKey) headers["x-api-key"] = proxyKey;
