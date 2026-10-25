@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   if (!url) return new NextResponse("Missing url param", { status: 400 });
   const isPerigee = url.startsWith("https://live.perigeeportal.co.za/");
-  if (!isPerigee && !url.startsWith("https://www.fieldgoose.com/")) {
+  if (!isPerigee && !/^https?:\/\/www\.fieldgoose\.com\//.test(url)) {
     return new NextResponse("Disallowed domain", { status: 403 });
   }
 
