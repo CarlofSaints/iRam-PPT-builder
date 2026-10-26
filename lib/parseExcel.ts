@@ -29,7 +29,8 @@ const COLUMN_MAP: Record<string, string[]> = {
   replyNotes:     ["reply notes", "reply comment", "reply comments"],
   replyResponse:  ["reply response", "response"],
   visitId:        ["id", "visit id", "task id", "visit uuid"],
-  date:           ["date", "visit date", "date of visit", "created date", "reply date"],
+  // "created" / "reply on" are the Field Goose task export names
+  date:           ["date", "visit date", "date of visit", "created date", "reply date", "created", "reply on"],
   image1:         ["image 1", "image1", "photo 1", "photo1"],
   image2:         ["image 2", "image2", "photo 2", "photo2"],
   image3:         ["image 3", "image3", "photo 3", "photo3"],
@@ -49,6 +50,10 @@ const META_HEADERS = new Set([
   "reply by", "replied by", "completed by", "reply notes", "reply comment",
   "reply comments", "reply response", "response", "user", "rep", "latitude",
   "longitude",
+  // Field Goose task export fields
+  "can complete expired", "requires photo", "late notification", "expires date",
+  "expires time", "must complete", "created on", "created", "updated by", "updated",
+  "reply on", "reply platform",
 ]);
 
 /** Values that always mean a column is a choice question, however few rows. */
@@ -174,6 +179,12 @@ function buildColMapFromMapping(
         colMap[field] = c;
         break;
       }
+    }
+    // A template saved against a Perigee export still reads a Field Goose one
+    // whose header was renamed: fall back to the field's known aliases.
+    if (colMap[field] === undefined) {
+      const c = headerRow.findIndex((h) => COLUMN_MAP[field]?.includes(norm(String(h))));
+      if (c >= 0) colMap[field] = c;
     }
   }
   return colMap;
