@@ -7,6 +7,7 @@ import type { Session } from "@/lib/useAuth";
 
 const NAV_ITEMS = [
   { href: "/", label: "Generate PPT", icon: "📊" },
+  { href: "/pictures-to-cells", label: "Pictures to Cells", icon: "🖼️" },
   { href: "/control-centre", label: "Control Centre", icon: "⚙️" },
 ];
 
