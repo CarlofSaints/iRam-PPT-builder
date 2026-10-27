@@ -30,6 +30,14 @@ export function useAuth() {
     try {
       const s: Session = JSON.parse(raw);
       setSession(s);
+      // The server-side session (cookie) is what the API trusts. No cookie, or it expired:
+      // drop the display copy and go back through the Hub sign-in.
+      fetch('/api/sso/callback', { cache: 'no-store' }).then(res => {
+        if (res.status === 401) {
+          localStorage.removeItem(SESSION_KEY);
+          router.replace('/login');
+        }
+      }).catch(() => { /* offline: keep the display copy */ });
     } catch {
       localStorage.removeItem(SESSION_KEY);
       router.replace("/login");
@@ -38,7 +46,8 @@ export function useAuth() {
     }
   }, [router]);
 
-  function logout() {
+  async function logout() {
+    await fetch('/api/sso/callback', { method: 'DELETE' }).catch(() => {});
     localStorage.removeItem(SESSION_KEY);
     const hubUrl =
       process.env.NEXT_PUBLIC_IRAM_HUB_URL || "https://iram-hub.vercel.app";

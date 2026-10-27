@@ -1,11 +1,12 @@
 import { logRoute } from "@/components/pictures-to-cells/server";
+import { sessionFromRequest } from "@/lib/pptSession";
 
-// PPT Builder keeps no user list on the server (sign-in is the Hub's SSO, session in the
-// browser), so the log takes the name the signed-in page sends, like the rest of this app.
+// Who is calling comes from the signed session cookie set at Hub sign-in (lib/pptSession.ts),
+// never from headers the browser sends.
 export const { GET, POST } = logRoute({
   access: "public",
   user: async (req) => {
-    const name = req.headers.get("x-user-name");
-    return req.headers.get("x-user-id") && name ? decodeURIComponent(name) : null;
+    const s = await sessionFromRequest(req);
+    return s ? `${s.name} ${s.surname} (${s.email})`.replace(/\s+/g, " ").trim() : null;
   },
 });
