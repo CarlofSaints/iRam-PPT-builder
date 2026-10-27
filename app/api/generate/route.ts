@@ -3,6 +3,7 @@ import sharp from "sharp";
 import type { ParsedData, ImageData } from "@/lib/types";
 import { getTemplate } from "@/lib/templateData";
 import { buildPptx } from "@/lib/pptBuilder";
+import { fetchAllowed, isPhotoUrl } from "@/lib/urlGuard";
 
 export const maxDuration = 300;
 
@@ -15,7 +16,7 @@ const DOWNLOAD_CONCURRENCY = 12;
  * painful to open. Downscaling to slide resolution cuts that by ~10x with no
  * visible loss at the sizes we lay out.
  */
-async function compressImage(buffer: ArrayBuffer): Promise<Buffer> {
+async function compressImage(buffer: ArrayBuffer): Promise<Buffer | null> {
   const input = Buffer.from(buffer);
   try {
     return await sharp(input)
@@ -24,7 +25,7 @@ async function compressImage(buffer: ArrayBuffer): Promise<Buffer> {
       .jpeg({ quality: 72, mozjpeg: true })
       .toBuffer();
   } catch {
-    return input;                              // unreadable image — embed as-is
+    return null;                               // not a decodable image: embed nothing (raw bytes could be any response)
   }
 }
 
@@ -37,31 +38,34 @@ async function downloadImage(url: string): Promise<string | null> {
   const proxyUrl = process.env.IMAGE_PROXY_URL;
   const proxyKey = process.env.IMAGE_PROXY_API_KEY;
 
+  // Only Field Goose / Perigee photo links: the URL comes from the request body.
+  if (!isPhotoUrl(url)) return null;
   try {
-    let upstream: Response;
+    let buffer: ArrayBuffer;
 
     if (proxyUrl && url.startsWith("https://live.perigeeportal.co.za")) {
       const fullUrl = `${proxyUrl}/image?url=${encodeURIComponent(url)}`;
       const headers: Record<string, string> = {};
       if (proxyKey) headers["x-api-key"] = proxyKey;
-      upstream = await fetch(fullUrl, { headers });
+      const upstream = await fetch(fullUrl, { headers });
+      if (!upstream.ok) {
+        console.warn(`[generate] Image fetch failed (${upstream.status}): ${url.substring(0, 80)}`);
+        return null;
+      }
+      buffer = await upstream.arrayBuffer();
     } else {
-      upstream = await fetch(url, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
+      const got = await fetchAllowed(url, isPhotoUrl, 25 * 1024 * 1024, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
       });
+      if (!got) {
+        console.warn(`[generate] Image fetch failed: ${url.substring(0, 80)}`);
+        return null;
+      }
+      buffer = got.buf;
     }
 
-    if (!upstream.ok) {
-      console.warn(`[generate] Image fetch failed (${upstream.status}): ${url.substring(0, 80)}`);
-      return null;
-    }
-
-    const buffer = await upstream.arrayBuffer();
     const compressed = await compressImage(buffer);
-    return compressed.toString("base64");
+    return compressed ? compressed.toString("base64") : null;
   } catch (err) {
     console.warn(`[generate] Image fetch error: ${url.substring(0, 80)}`, err);
     return null;

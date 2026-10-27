@@ -2,6 +2,7 @@ import PptxGenJS from "pptxgenjs";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { groupVisits, IMAGES_PER_SLIDE } from "./visits";
+import { fetchAllowed, isOwnBlobUrl } from "./urlGuard";
 import type {
   ParsedData,
   PptTemplate,
@@ -60,6 +61,19 @@ function getFallbackLogo(): string | null {
   return _fallbackLogoBase64;
 }
 
+/** The template logo as embeddable data. Only this app's own Blob images; never handed to
+ *  pptxgenjs as a path, which would read a local file or fetch any URL. */
+async function logoAsData(url: string | null | undefined): Promise<string | null> {
+  if (!url) return null;
+  try {
+    const got = await fetchAllowed(url, isOwnBlobUrl, 5 * 1024 * 1024);
+    if (!got || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(got.type)) return null;
+    return `${got.type};base64,${Buffer.from(got.buf).toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /*  .pptx template: extract background image via JSZip                 */
 /* ------------------------------------------------------------------ */
@@ -68,10 +82,10 @@ async function extractPptxBackground(
 ): Promise<string | null> {
   try {
     const JSZip = (await import("jszip")).default;
-    const res = await fetch(pptxUrl, { cache: "no-store" });
-    if (!res.ok) return null;
-
-    const buf = await res.arrayBuffer();
+    // Only this app's own uploaded .pptx (the URL is stored from requests).
+    const got = await fetchAllowed(pptxUrl, isOwnBlobUrl, 25 * 1024 * 1024);
+    if (!got) return null;
+    const buf = got.buf;
     const zip = await JSZip.loadAsync(buf);
 
     // Look for slide master background image (common locations)
@@ -134,7 +148,7 @@ export async function buildPptx(
   }
 
   // Resolve logo: template logo → fallback iRAM logo → null
-  const logoData = template.logoUrl || (() => {
+  const logoData = (await logoAsData(template.logoUrl)) || (() => {
     const fb = getFallbackLogo();
     return fb ? `image/png;base64,${fb}` : null;
   })();
@@ -239,11 +253,7 @@ function addTitleSlide(
       h: 0.9,
       sizing: { type: "contain", w: 1.8, h: 0.9 },
     };
-    if (logoData.startsWith("image/")) {
-      imgOpts.data = logoData;
-    } else {
-      imgOpts.path = logoData;
-    }
+    imgOpts.data = logoData; // always data (logoAsData / fallback), never a path
     slide.addImage(imgOpts);
   }
 
@@ -983,11 +993,7 @@ function addClosingSlide(
       h: 1.5,
       sizing: { type: "contain", w: 3, h: 1.5 },
     };
-    if (logoData.startsWith("image/")) {
-      imgOpts.data = logoData;
-    } else {
-      imgOpts.path = logoData;
-    }
+    imgOpts.data = logoData; // always data (logoAsData / fallback), never a path
     slide.addImage(imgOpts);
   }
 

@@ -1,5 +1,6 @@
 import { readJson, writeJson, deleteJson } from "./blob";
 import type { PptTemplate } from "./types";
+import { isOwnBlobUrl } from "./urlGuard";
 
 const BLOB_KEY = "templates.json";
 
@@ -51,7 +52,7 @@ export async function createTemplate(
     logoUrl: null,
     fontFamily: data.fontFamily || "Arial",
     columnMapping: data.columnMapping ?? null,
-    pptxTemplateUrl: data.pptxTemplateUrl ?? null,
+    pptxTemplateUrl: isOwnBlobUrl(data.pptxTemplateUrl) ? data.pptxTemplateUrl! : null,
     outputNaming: data.outputNaming ?? "{title}_Report",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -69,6 +70,11 @@ export async function updateTemplate(
   const all = await loadTemplates();
   const idx = all.findIndex((t) => t.id === id);
   if (idx === -1) return null;
+
+  // Stored URLs are fetched when decks are built: only this app's own Blob files.
+  data = { ...data };
+  if (data.logoUrl && !isOwnBlobUrl(data.logoUrl)) data.logoUrl = null;
+  if (data.pptxTemplateUrl && !isOwnBlobUrl(data.pptxTemplateUrl)) data.pptxTemplateUrl = null;
 
   all[idx] = {
     ...all[idx],
