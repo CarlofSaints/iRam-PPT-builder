@@ -138,4 +138,6 @@ export interface PptTemplate {
 export interface ImageData {
   data: string;               // base64 string
   type: "jpeg" | "png";
+  width: number;              // pixels, after downscaling
+  height: number;
 }

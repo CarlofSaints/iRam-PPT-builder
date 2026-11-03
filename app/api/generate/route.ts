@@ -16,14 +16,15 @@ const DOWNLOAD_CONCURRENCY = 12;
  * painful to open. Downscaling to slide resolution cuts that by ~10x with no
  * visible loss at the sizes we lay out.
  */
-async function compressImage(buffer: ArrayBuffer): Promise<Buffer | null> {
+async function compressImage(buffer: ArrayBuffer): Promise<ImageData | null> {
   const input = Buffer.from(buffer);
   try {
-    return await sharp(input)
+    const { data, info } = await sharp(input)
       .rotate()                                // honour EXIF orientation
       .resize({ width: 1400, height: 1400, fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 72, mozjpeg: true })
-      .toBuffer();
+      .toBuffer({ resolveWithObject: true });
+    return { data: data.toString("base64"), type: "jpeg", width: info.width, height: info.height };
   } catch {
     return null;                               // not a decodable image: embed nothing (raw bytes could be any response)
   }
@@ -32,9 +33,9 @@ async function compressImage(buffer: ArrayBuffer): Promise<Buffer | null> {
 /**
  * Download a single image. Old Perigee URLs go via the Railway proxy (it only
  * accepts live.perigeeportal.co.za); Field Goose URLs are public, fetch direct.
- * Returns base64 string or null on failure.
+ * Returns the downscaled image (base64 + pixel size) or null on failure.
  */
-async function downloadImage(url: string): Promise<string | null> {
+async function downloadImage(url: string): Promise<ImageData | null> {
   const proxyUrl = process.env.IMAGE_PROXY_URL;
   const proxyKey = process.env.IMAGE_PROXY_API_KEY;
 
@@ -64,8 +65,7 @@ async function downloadImage(url: string): Promise<string | null> {
       buffer = got.buf;
     }
 
-    const compressed = await compressImage(buffer);
-    return compressed ? compressed.toString("base64") : null;
+    return await compressImage(buffer);
   } catch (err) {
     console.warn(`[generate] Image fetch error: ${url.substring(0, 80)}`, err);
     return null;
@@ -122,9 +122,9 @@ export async function POST(req: Request) {
         const i = cursor++;
         if (i >= allUrls.length) return;
         const url = allUrls[i];
-        const base64 = await downloadImage(url);
-        if (base64) {
-          imageMap.set(url, { data: base64, type: "jpeg" });
+        const img = await downloadImage(url);
+        if (img) {
+          imageMap.set(url, img);
           downloaded++;
         }
       }
