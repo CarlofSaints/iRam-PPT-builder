@@ -222,6 +222,23 @@ export default function HomePage() {
         </select>
       </div>
 
+      {/* What to include */}
+      <fieldset className="bg-white border border-gray-200 rounded-lg p-4 space-y-2" disabled={isGenerating}>
+        <legend className="text-xs font-medium text-gray-600 px-1">Include on each store slide</legend>
+        <label className="flex items-center gap-2 text-sm text-[#32373C]">
+          <input type="checkbox" checked={showRep} onChange={(e) => setShowRep(e.target.checked)} className="accent-[#7CC042]" />
+          Rep name
+        </label>
+        <label className="flex items-center gap-2 text-sm text-[#32373C]">
+          <input type="checkbox" checked={showDate} onChange={(e) => setShowDate(e.target.checked)} className="accent-[#7CC042]" />
+          Visit date
+        </label>
+        <label className="flex items-center gap-2 text-sm text-[#32373C] pt-2 border-t border-gray-100">
+          <input type="checkbox" checked={wantSummary} onChange={(e) => setWantSummary(e.target.checked)} className="accent-[#7CC042]" />
+          Would you like an Excel summary? (stores, visits and pictures by rep, and by store)
+        </label>
+      </fieldset>
+
       {/* Upload zone */}
       <UploadZone onFile={handleFile} disabled={isGenerating} />
 
@@ -245,25 +262,6 @@ export default function HomePage() {
 
       {/* Data preview */}
       {parsedData && <DataPreview data={parsedData} />}
-
-      {/* What to include */}
-      {parsedData && stage !== "done" && (
-        <fieldset className="bg-white border border-gray-200 rounded-lg p-4 space-y-2" disabled={isGenerating}>
-          <legend className="text-xs font-medium text-gray-600 px-1">Include on each store slide</legend>
-          <label className="flex items-center gap-2 text-sm text-[#32373C]">
-            <input type="checkbox" checked={showRep} onChange={(e) => setShowRep(e.target.checked)} className="accent-[#7CC042]" />
-            Rep name
-          </label>
-          <label className="flex items-center gap-2 text-sm text-[#32373C]">
-            <input type="checkbox" checked={showDate} onChange={(e) => setShowDate(e.target.checked)} className="accent-[#7CC042]" />
-            Visit date
-          </label>
-          <label className="flex items-center gap-2 text-sm text-[#32373C] pt-2 border-t border-gray-100">
-            <input type="checkbox" checked={wantSummary} onChange={(e) => setWantSummary(e.target.checked)} className="accent-[#7CC042]" />
-            Would you like an Excel summary? (stores, visits and pictures by rep, and by store)
-          </label>
-        </fieldset>
-      )}
 
       {/* Generate button */}
       {parsedData && stage !== "done" && (
