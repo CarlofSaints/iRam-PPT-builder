@@ -6,6 +6,52 @@ import DataPreview from "@/components/DataPreview";
 import GenerateProgress from "@/components/GenerateProgress";
 import type { ProgressStage } from "@/components/GenerateProgress";
 import type { ParsedData, PptTemplate } from "@/lib/types";
+import { summarise } from "@/lib/summary";
+
+/** Browser download of an in-memory file */
+function saveFile(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.download = name;
+  a.href = url;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** Two-sheet summary (by rep, by store) — built in the browser from the parsed file */
+async function downloadSummary(data: ParsedData, baseName: string) {
+  const { default: ExcelJS } = await import("exceljs");
+  const { byRep, byStore } = summarise(data);
+  const wb = new ExcelJS.Workbook();
+  const sheet = (name: string, columns: { header: string; key: string; width: number }[], rows: object[]) => {
+    const ws = wb.addWorksheet(name);
+    ws.columns = columns;
+    ws.addRows(rows);
+    ws.getRow(1).font = { bold: true };
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+  };
+  sheet("By Rep", [
+    { header: "Rep", key: "rep", width: 30 },
+    { header: "Unique Stores", key: "uniqueStores", width: 15 },
+    { header: "Total Visits", key: "totalVisits", width: 13 },
+    { header: "Pictures", key: "pictures", width: 11 },
+  ], byRep);
+  sheet("By Store", [
+    { header: "Store Code", key: "storeCode", width: 14 },
+    { header: "Store", key: "store", width: 40 },
+    { header: "Channel", key: "channel", width: 16 },
+    { header: "Unique Reps", key: "uniqueReps", width: 13 },
+    { header: "Total Visits", key: "totalVisits", width: 13 },
+    { header: "Pictures", key: "pictures", width: 11 },
+  ], byStore);
+  const buf = await wb.xlsx.writeBuffer();
+  saveFile(
+    new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+    `${baseName}_Summary.xlsx`
+  );
+}
 
 export default function HomePage() {
   const [parsedData, setParsedData] = useState<ParsedData | null>(null);
@@ -15,6 +61,9 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [fileName, setFileName] = useState("");
   const [downloadedCount, setDownloadedCount] = useState(0);
+  const [showRep, setShowRep] = useState(true);
+  const [showDate, setShowDate] = useState(true);
+  const [wantSummary, setWantSummary] = useState(false);
 
   // Load templates on mount
   useEffect(() => {
@@ -75,6 +124,7 @@ export default function HomePage() {
         body: JSON.stringify({
           data: parsedData,
           templateId: selectedTemplate,
+          fields: { rep: showRep, date: showDate },
         }),
       });
 
@@ -98,24 +148,19 @@ export default function HomePage() {
 
       // Download the PPTX
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-
       const cd = res.headers.get("Content-Disposition");
       const match = cd?.match(/filename="?([^"]+)"?/);
-      a.download = match?.[1] || "Report.pptx";
-      a.href = url;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const pptName = match?.[1] || "Report.pptx";
+      saveFile(blob, pptName);
+
+      if (wantSummary) await downloadSummary(parsedData, pptName.replace(/\.pptx$/i, ""));
 
       setStage("done");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Generation failed");
       setStage("error");
     }
-  }, [parsedData, selectedTemplate]);
+  }, [parsedData, selectedTemplate, showRep, showDate, wantSummary]);
 
   // Count images for progress display
   // Mirror the builder: only an explicit non-completed status skips a row, so
@@ -193,6 +238,25 @@ export default function HomePage() {
 
       {/* Data preview */}
       {parsedData && <DataPreview data={parsedData} />}
+
+      {/* What to include */}
+      {parsedData && stage !== "done" && (
+        <fieldset className="bg-white border border-gray-200 rounded-lg p-4 space-y-2" disabled={isGenerating}>
+          <legend className="text-xs font-medium text-gray-600 px-1">Include on each store slide</legend>
+          <label className="flex items-center gap-2 text-sm text-[#32373C]">
+            <input type="checkbox" checked={showRep} onChange={(e) => setShowRep(e.target.checked)} className="accent-[#7CC042]" />
+            Rep name
+          </label>
+          <label className="flex items-center gap-2 text-sm text-[#32373C]">
+            <input type="checkbox" checked={showDate} onChange={(e) => setShowDate(e.target.checked)} className="accent-[#7CC042]" />
+            Visit date
+          </label>
+          <label className="flex items-center gap-2 text-sm text-[#32373C] pt-2 border-t border-gray-100">
+            <input type="checkbox" checked={wantSummary} onChange={(e) => setWantSummary(e.target.checked)} className="accent-[#7CC042]" />
+            Would you like an Excel summary? (stores, visits and pictures by rep, and by store)
+          </label>
+        </fieldset>
+      )}
 
       {/* Generate button */}
       {parsedData && stage !== "done" && (

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import sharp from "sharp";
-import type { ParsedData, ImageData } from "@/lib/types";
+import type { ParsedData, ImageData, SlideFields } from "@/lib/types";
 import { getTemplate } from "@/lib/templateData";
 import { buildPptx } from "@/lib/pptBuilder";
 import { fetchAllowed, isPhotoUrl } from "@/lib/urlGuard";
@@ -75,9 +75,10 @@ async function downloadImage(url: string): Promise<string | null> {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { data, templateId } = body as {
+    const { data, templateId, fields } = body as {
       data: ParsedData;
       templateId?: string;
+      fields?: SlideFields;
     };
 
     if (!data || !data.rows) {
@@ -135,7 +136,10 @@ export async function POST(req: Request) {
     console.log(`[generate] Downloaded ${downloaded}/${allUrls.length} images`);
 
     // Build the PPTX
-    const pptxBuffer = await buildPptx(data, template, imageMap);
+    const pptxBuffer = await buildPptx(data, template, imageMap, {
+      rep: fields?.rep !== false,
+      date: fields?.date !== false,
+    });
 
     // Build filename from template's outputNaming pattern (or default)
     const pattern = template.outputNaming || "{title}_Report";

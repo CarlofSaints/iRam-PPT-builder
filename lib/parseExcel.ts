@@ -29,8 +29,13 @@ const COLUMN_MAP: Record<string, string[]> = {
   replyNotes:     ["reply notes", "reply comment", "reply comments"],
   replyResponse:  ["reply response", "response"],
   visitId:        ["id", "visit id", "task id", "visit uuid"],
-  // "created" / "reply on" are the Field Goose task export names
-  date:           ["date", "visit date", "date of visit", "created date", "reply date", "created", "reply on"],
+  // Alias order is priority: a task's visit date is when the rep replied
+  // ("Reply on"), not when the task was set up ("Created") — both are Field Goose task columns.
+  date:           ["date", "visit date", "date of visit", "reply date", "reply on", "created date", "created"],
+  // Field Goose form exports name the rep in these instead of "Reply by"
+  firstName:      ["first name"],
+  lastName:       ["last name"],
+  email:          ["email"],
   image1:         ["image 1", "image1", "photo 1", "photo1"],
   image2:         ["image 2", "image2", "photo 2", "photo2"],
   image3:         ["image 3", "image3", "photo 3", "photo3"],
@@ -60,6 +65,15 @@ const META_HEADERS = new Set([
 const BOOLEAN_VALUES = new Set([
   "yes", "no", "y", "n", "true", "false", "n/a", "na", "not applicable",
 ]);
+
+/** First column matching the earliest alias in the list (alias order = priority). */
+function findCol(headerRow: unknown[], aliases: string[] | undefined): number {
+  for (const a of aliases ?? []) {
+    const c = headerRow.findIndex((h) => norm(String(h ?? "")) === a);
+    if (c >= 0) return c;
+  }
+  return -1;
+}
 
 /** Normalise a header cell value for matching */
 function norm(s: string): string {
@@ -183,9 +197,14 @@ function buildColMapFromMapping(
     // A template saved against a Perigee export still reads a Field Goose one
     // whose header was renamed: fall back to the field's known aliases.
     if (colMap[field] === undefined) {
-      const c = headerRow.findIndex((h) => COLUMN_MAP[field]?.includes(norm(String(h))));
+      const c = findCol(headerRow, COLUMN_MAP[field]);
       if (c >= 0) colMap[field] = c;
     }
+  }
+  // Rep-name columns are never in a saved mapping; always read them by alias.
+  for (const f of ["firstName", "lastName", "email"]) {
+    const c = findCol(headerRow, COLUMN_MAP[f]);
+    if (c >= 0) colMap[f] = c;
   }
   return colMap;
 }
@@ -347,13 +366,8 @@ export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): Pars
     const headerRow = raw[headerRowIdx];
     colMap = {};
     for (const [fieldKey, aliases] of Object.entries(COLUMN_MAP)) {
-      for (let c = 0; c < headerRow.length; c++) {
-        const n = norm(String(headerRow[c]));
-        if (aliases.includes(n)) {
-          colMap[fieldKey] = c;
-          break;
-        }
-      }
+      const c = findCol(headerRow, aliases);
+      if (c >= 0) colMap[fieldKey] = c;
     }
 
     // Auto-detect image columns. Perigee form/relay exports store photos in
@@ -466,7 +480,10 @@ export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): Pars
       storeFullName: val("storeFullName"),
       createdBy: val("createdBy"),
       replyStatus: val("replyStatus"),
-      replyBy: val("replyBy"),
+      replyBy:
+        val("replyBy") ||
+        [val("firstName"), val("lastName")].filter(Boolean).join(" ") ||
+        val("email"),
       replyNotes: val("replyNotes"),
       replyResponse: val("replyResponse"),
       visitId: val("visitId"),

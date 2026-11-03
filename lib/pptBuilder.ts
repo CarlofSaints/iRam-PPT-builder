@@ -10,6 +10,7 @@ import type {
   StoreVisit,
   QuestionStat,
   DeckSummary,
+  SlideFields,
 } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -130,7 +131,8 @@ function safeDeckSummary(data: ParsedData): DeckSummary {
 export async function buildPptx(
   data: ParsedData,
   template: PptTemplate,
-  imageMap: Map<string, ImageData>         // url → processed image
+  imageMap: Map<string, ImageData>,        // url → processed image
+  fields: SlideFields = { rep: true, date: true }
 ): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE";            // 13.33 x 7.5  (we'll use 10 x 5.625 override)
@@ -202,7 +204,13 @@ export async function buildPptx(
     for (let p = 0; p < pageCount; p++) {
       const chunk = imgs.slice(p * IMAGES_PER_SLIDE, p * IMAGES_PER_SLIDE + IMAGES_PER_SLIDE);
       const pageInfo = pageCount > 1 ? { page: p + 1, total: pageCount } : null;
-      addStoreSlide(pptx, visit, chunk, primary, accent, font, bgImage, pageInfo);
+      // Hidden fields are blanked on a copy, so the layout closes up around them.
+      const shown = {
+        ...visit,
+        replyBy: fields.rep ? visit.replyBy : "",
+        date: fields.date ? visit.date : "",
+      };
+      addStoreSlide(pptx, shown, chunk, primary, accent, font, bgImage, pageInfo);
     }
   }
 
