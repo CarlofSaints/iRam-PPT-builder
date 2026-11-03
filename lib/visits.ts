@@ -29,8 +29,9 @@ export function groupVisits(
 
   rows.forEach((row, i) => {
     // Rows with no store at all must not all collapse into a single visit.
+    // Rep is in the key: two reps at one store on one day are two visits, each credited.
     const key = row.store
-      ? `${row.storeCode}|${row.store}|${row.date}`
+      ? `${row.storeCode}|${row.store}|${row.date}|${row.replyBy}`
       : `__row${i}`;
 
     let visit = visits.get(key);
@@ -72,14 +73,19 @@ export function groupVisits(
   return [...visits.values()];
 }
 
+/** A task with an explicit status other than "completed" was never visited. Form exports have no status. */
+export function notDone(status: string): boolean {
+  const s = status.toLowerCase().trim();
+  return Boolean(s) && s !== "completed";
+}
+
 /** How many store slides a set of visits will produce. */
 export function countStoreSlides(
   visits: StoreVisit[],
   imagesPerSlide: number
 ): number {
   return visits.reduce((sum, v) => {
-    const status = v.replyStatus.toLowerCase().trim();
-    if (status && status !== "completed") return sum;
+    if (notDone(v.replyStatus)) return sum;
     return sum + Math.ceil(v.images.length / imagesPerSlide);
   }, 0);
 }

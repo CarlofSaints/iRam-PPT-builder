@@ -1,4 +1,4 @@
-import { groupVisits } from "./visits";
+import { groupVisits, notDone } from "./visits";
 import type { ParsedData } from "./types";
 
 export interface RepSummaryRow {
@@ -23,17 +23,15 @@ export interface StoreSummaryRow {
  * explicit non-completed status are not visits (nobody went), same as the deck.
  */
 export function summarise(data: ParsedData): { byRep: RepSummaryRow[]; byStore: StoreSummaryRow[] } {
-  const visits = groupVisits(data.rows, data.questionStats ?? []).filter((v) => {
-    const s = v.replyStatus.toLowerCase().trim();
-    return !s || s === "completed";
-  });
+  const visits = groupVisits(data.rows, data.questionStats ?? []).filter((v) => !notDone(v.replyStatus));
 
   const reps = new Map<string, { stores: Set<string>; visits: number; pictures: number }>();
   const stores = new Map<string, StoreSummaryRow & { reps: Set<string> }>();
 
-  for (const v of visits) {
+  visits.forEach((v, i) => {
     const rep = v.replyBy || "(no rep)";
-    const storeKey = `${v.storeCode}|${v.store}`;
+    // Store-less visits stay separate rows, as they do in the deck.
+    const storeKey = v.store ? `${v.storeCode}|${v.store}` : `__visit${i}`;
 
     const r = reps.get(rep) ?? { stores: new Set(), visits: 0, pictures: 0 };
     r.stores.add(storeKey);
@@ -49,7 +47,7 @@ export function summarise(data: ParsedData): { byRep: RepSummaryRow[]; byStore: 
     s.totalVisits++;
     s.pictures += v.images.length;
     stores.set(storeKey, s);
-  }
+  });
 
   const byRep = [...reps].map(([rep, r]) => ({
     rep, uniqueStores: r.stores.size, totalVisits: r.visits, pictures: r.pictures,
