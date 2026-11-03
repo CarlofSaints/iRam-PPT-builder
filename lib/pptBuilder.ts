@@ -894,14 +894,16 @@ function addStoreSlide(
     const { x, y, w, h } = layouts[i];
     const picH = h - captionH;
 
-    slide.addImage({
-      data: `image/jpeg;base64,${imgs[i].img.data}`,
-      x,
-      y,
-      w,
-      h: picH,
-      sizing: { type: "contain", w, h: picH },
-    });
+    // Fit the photo inside its cell ourselves so the border hugs the photo, not the cell.
+    const { width: pw, height: ph } = imgs[i].img;
+    const scale = Math.min(w / pw, picH / ph);
+    const fw = pw * scale;
+    const fh = ph * scale;
+    const fx = x + (w - fw) / 2;
+    const fy = y + (picH - fh) / 2;
+
+    slide.addImage({ data: `image/jpeg;base64,${imgs[i].img.data}`, x: fx, y: fy, w: fw, h: fh });
+    slide.addShape("rect", { x: fx, y: fy, w: fw, h: fh, fill: { type: "none" }, line: { color: "BFBFBF", width: 1 } });
 
     if (captionH && imgs[i].caption) {
       slide.addText(imgs[i].caption, {
