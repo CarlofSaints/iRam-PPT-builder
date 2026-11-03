@@ -17,3 +17,11 @@ assert.equal(sum(byStore, (r) => r.totalVisits), d.deckSummary.totalVisits);
 assert.equal(sum(byRep, (r) => r.pictures), sum(byStore, (r) => r.pictures));
 assert.equal(byStore.length, d.deckSummary.uniqueSites);
 console.log('OK', { reps: byRep.length, stores: byStore.length, firstRow: d.rows[0].replyBy + ' / ' + d.rows[0].date });
+
+// Two reps at the same store on the same day: each gets the visit.
+const twin = { ...d.rows[0], replyBy: 'Second Rep', images: ['https://x/1'] };
+const two = summarise({ ...d, rows: [d.rows[0], twin] });
+assert.equal(two.byRep.length, 2, 'second rep lost');
+assert.equal(two.byStore[0].uniqueReps, 2);
+assert.equal(two.byStore[0].totalVisits, 2);
+console.log('OK two reps, one store');

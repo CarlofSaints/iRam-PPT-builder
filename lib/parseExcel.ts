@@ -29,7 +29,7 @@ const COLUMN_MAP: Record<string, string[]> = {
   replyNotes:     ["reply notes", "reply comment", "reply comments"],
   replyResponse:  ["reply response", "response"],
   visitId:        ["id", "visit id", "task id", "visit uuid"],
-  // Alias order is priority: a task's visit date is when the rep replied
+  // Alias order is priority (date only): a task's visit date is when the rep replied
   // ("Reply on"), not when the task was set up ("Created") — both are Field Goose task columns.
   date:           ["date", "visit date", "date of visit", "reply date", "reply on", "created date", "created"],
   // Field Goose form exports name the rep in these instead of "Reply by"
@@ -197,7 +197,9 @@ function buildColMapFromMapping(
     // A template saved against a Perigee export still reads a Field Goose one
     // whose header was renamed: fall back to the field's known aliases.
     if (colMap[field] === undefined) {
-      const c = findCol(headerRow, COLUMN_MAP[field]);
+      const c = field === "date"
+        ? findCol(headerRow, COLUMN_MAP[field])
+        : headerRow.findIndex((h) => COLUMN_MAP[field]?.includes(norm(String(h))));
       if (c >= 0) colMap[field] = c;
     }
   }
@@ -366,7 +368,9 @@ export function parseExcel(buffer: Buffer, mapping?: ColumnMapping | null): Pars
     const headerRow = raw[headerRowIdx];
     colMap = {};
     for (const [fieldKey, aliases] of Object.entries(COLUMN_MAP)) {
-      const c = findCol(headerRow, aliases);
+      const c = fieldKey === "date"
+        ? findCol(headerRow, aliases)
+        : headerRow.findIndex((h) => aliases.includes(norm(String(h))));
       if (c >= 0) colMap[fieldKey] = c;
     }
 

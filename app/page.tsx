@@ -64,6 +64,7 @@ export default function HomePage() {
   const [showRep, setShowRep] = useState(true);
   const [showDate, setShowDate] = useState(true);
   const [wantSummary, setWantSummary] = useState(false);
+  const [summaryName, setSummaryName] = useState("Report");
 
   // Load templates on mount
   useEffect(() => {
@@ -153,7 +154,13 @@ export default function HomePage() {
       const pptName = match?.[1] || "Report.pptx";
       saveFile(blob, pptName);
 
-      if (wantSummary) await downloadSummary(parsedData, pptName.replace(/\.pptx$/i, ""));
+      setSummaryName(pptName.replace(/\.pptx$/i, ""));
+      // The deck is already down: a summary failure must not report the whole run as failed.
+      if (wantSummary) {
+        await downloadSummary(parsedData, pptName.replace(/\.pptx$/i, "")).catch(() =>
+          setError("The deck downloaded, but the Excel summary failed. Use the button below to try again.")
+        );
+      }
 
       setStage("done");
     } catch (err: unknown) {
@@ -278,6 +285,20 @@ export default function HomePage() {
         imageCount={imageCount}
         downloadedCount={downloadedCount}
       />
+
+      {/* Chrome can block a second automatic download; a click here always works */}
+      {stage === "done" && wantSummary && parsedData && (
+        <div className="space-y-1">
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button
+            onClick={() => downloadSummary(parsedData, summaryName).then(() => setError(""), () => setError("The Excel summary failed again."))}
+            className="px-4 py-2 border border-[#7CC042] text-[#5a9a2e] text-sm font-semibold rounded-md hover:bg-[#7CC042]/10"
+          >
+            Download Excel summary
+          </button>
+          <p className="text-xs text-gray-500">No Excel? Your browser may have blocked the second download. Click the button above.</p>
+        </div>
+      )}
 
       {/* Reset after done */}
       {stage === "done" && (
