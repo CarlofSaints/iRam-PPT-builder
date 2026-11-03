@@ -82,6 +82,12 @@ export interface StoreVisit {
   images: { url: string; caption: string }[];
 }
 
+/** Which optional fields the person running the tool wants on store slides */
+export interface SlideFields {
+  rep: boolean;
+  date: boolean;
+}
+
 /** Which kind of Perigee export we are dealing with */
 export type ExportMode = "task" | "form";
 
